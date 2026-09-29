@@ -1,0 +1,24 @@
+{
+  "name": "adguardhome-tor-dns-fortress",
+  "version": "1.0.0",
+  "description": "Ultra-Hardened DNS Privacy & Anti-Censorship Fortress for Windows (AdGuard Home + Tor + GoodbyeDPI + AI Guard + Decoy)",
+  "main": "scripts/ai_dns_guard.js",
+  "scripts": {
+    "start:guard": "node scripts/ai_dns_guard.js",
+    "start:decoy": "node scripts/decoy_dns.js",
+    "test:health": "powershell.exe -ExecutionPolicy Bypass -File scripts/test_fortress.ps1"
+  },
+  "keywords": [
+    "adguardhome",
+    "tor",
+    "dns-privacy",
+    "doh",
+    "anti-censorship",
+    "goodbyedpi",
+    "dnssec",
+    "cybersecurity",
+    "windows11"
+  ],
+  "author": "jpscalero",
+  "license": "MIT"
+}

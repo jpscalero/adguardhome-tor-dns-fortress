@@ -1,0 +1,232 @@
+# ==============================================================================
+# Ultra-Hardened AdGuard Home Master Configuration Template
+# Project: adguardhome-tor-dns-fortress
+# Author: jpscalero
+# License: MIT
+# ==============================================================================
+
+http:
+  pprof:
+    port: 6060
+    enabled: false
+  doh:
+    routes:
+      - GET /dns-query
+      - POST /dns-query
+      - GET /dns-query/{ClientID}
+      - POST /dns-query/{ClientID}
+    insecure_enabled: false
+  address: 127.0.0.1:80
+  session_ttl: 1d
+
+users:
+  - name: admin
+    # Replace with bcrypt hash generated during initial setup:
+    password: __ADMIN_BCRYPT_PASSWORD_HASH__
+
+auth_attempts: 3
+block_auth_min: 30
+
+# All upstream DNS requests travel encrypted through Tor Onion SOCKS5 proxy:
+http_proxy: socks5://127.0.0.1:9050
+language: en
+theme: dark
+
+dns:
+  # Explicit binding prevents conflicts with Windows services (SharedAccess / ICS):
+  bind_hosts:
+    - 127.0.0.1
+    - '::1'
+  port: 53
+
+  # Privacy & Anonymization Hardening:
+  anonymize_client_ip: true
+  ratelimit: 40
+  ratelimit_subnet_len_ipv4: 24
+  ratelimit_subnet_len_ipv6: 56
+  ratelimit_whitelist:
+    - 127.0.0.1
+  refuse_any: true
+
+  # Multi-Jurisdiction Parallel DoH Resolvers (All Routed Through Tor SOCKS5):
+  upstream_dns:
+    # Switzerland (Neutral, strict privacy laws)
+    - https://dns.digitale-gesellschaft.ch/dns-query
+    # Austria (Neutral EU, GDPR compliant)
+    - https://doh.applied-privacy.net/query
+    # Sweden (Mullvad zero-logs DoH)
+    - https://base.dns.mullvad.net/dns-query
+    # Germany (DNS.SB, uncensored & zero-logs)
+    - https://doh.dns.sb/dns-query
+    # Global Swiss Foundation (Quad9, malicious domain filtering)
+    - https://dns.quad9.net/dns-query
+    # Cloudflare Security (1.1.1.2 malware blocking)
+    - https://security.cloudflare-dns.com/dns-query
+    # Control D (Malware & tracker blocking)
+    - https://freedns.controld.com/p2
+    # Native Tor .onion resolver integration
+    - '[/onion/]127.0.0.1:5350'
+
+  upstream_dns_file: ""
+
+  # Encrypted Bootstraps for Initial Connection Resolution:
+  bootstrap_dns:
+    - https://9.9.9.9/dns-query
+    - https://1.1.1.2/dns-query
+    - tls://9.9.9.9
+    - tls://1.1.1.2
+    - 9.9.9.9
+    - 149.112.112.112
+    - 1.1.1.2
+
+  fallback_dns:
+    - 9.9.9.9
+    - 1.1.1.2
+    - 149.112.112.112
+
+  # Parallel Race Mode: queries all neutral resolvers concurrently, accepts fastest answer
+  upstream_mode: parallel
+  fastest_timeout: 1s
+
+  allowed_clients: []
+  disallowed_clients: []
+
+  # Fingerprinting & Probe Protection:
+  blocked_hosts:
+    - version.bind
+    - id.server
+    - hostname.bind
+    - version.server
+    - authors.bind
+    - localhost.bind
+    - whoami.akamai.net
+    - whoami.ultradns.net
+    - porttest.dns-oarc.net
+
+  trusted_proxies:
+    - 127.0.0.0/8
+    - ::1/128
+
+  # High-Speed RAM Optimistic Cache (32 MB, 100k+ entries):
+  cache_enabled: true
+  cache_size: 33554432
+  cache_ttl_min: 300
+  cache_ttl_max: 86400
+  cache_optimistic: true
+  cache_optimistic_answer_ttl: 1m
+  cache_optimistic_max_age: 1d
+
+  # ISP DNS Hijack Detection & Bogus NXDOMAIN Redirection:
+  bogus_nxdomain:
+    - 92.242.140.21
+    - 92.242.132.16
+    - 92.242.132.24
+    - 212.166.190.241
+    - 212.166.190.242
+    - 80.58.61.250
+    - 80.58.61.254
+    - 62.36.225.150
+    - 146.112.61.106
+    - 8.15.7.117
+    - 8.15.7.118
+    - 63.251.179.17
+
+  # Anti-Leak & Integrity Enforcements:
+  aaaa_disabled: true
+  enable_dnssec: true
+  edns_client_subnet:
+    custom_ip: ""
+    enabled: false
+    use_custom: false
+
+  max_goroutines: 300
+  handle_ddr: true
+  upstream_timeout: 5s
+  serve_plain_dns: true
+  hostsfile_enabled: true
+  pending_requests:
+    enabled: true
+
+tls:
+  enabled: false
+  server_name: ""
+  force_https: false
+  port_https: 443
+  port_dns_over_tls: 853
+  port_dns_over_quic: 853
+
+querylog:
+  dir_path: ""
+  ignored:
+    - arpa
+    - local
+    - home
+    - lan
+    - 0.in-addr.arpa
+    - 127.in-addr.arpa
+    - 254.169.in-addr.arpa
+    - 2.0.192.in-addr.arpa
+    - 100.51.198.in-addr.arpa
+    - 113.0.203.in-addr.arpa
+    - 255.255.255.255.in-addr.arpa
+  interval: 2160h
+  size_memory: 1000
+  enabled: true
+  file_enabled: true
+
+statistics:
+  dir_path: ""
+  ignored: []
+  interval: 2160h
+  enabled: true
+
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS Filter
+    id: 1
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
+    name: AdAway Default Blocklist
+    id: 2
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_5.txt
+    name: OISD Blocklist Small
+    id: 5
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
+    name: The Big Blocklist
+    id: 9
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt
+    name: MalwareDomainList.com
+    id: 11
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt
+    name: Phishing Army
+    id: 30
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
+    name: Scam Blocklist by Dandelion Sprout
+    id: 31
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt
+    name: WindowsSpyBlocker - Hosts spy rules
+    id: 42
+
+user_rules:
+  # Block WPAD auto-proxy exploit vectors:
+  - '||wpad.*^=NXDOMAIN'
+  - '||wpad^=NXDOMAIN'
+  # Block dangerous TLDs often abused in phishing/malware delivery:
+  - '||*.zip^$deny'
+  - '||*.mov^$deny'
+  # Block Apple Private Relay / Firefox DoH canary to force fortress resolution:
+  - '||use-application-dns.net^$dnsrewrite=NXDOMAIN'
+  - '||mask.icloud.com^$dnsrewrite=NXDOMAIN'
+  - '||mask-h2.icloud.com^$dnsrewrite=NXDOMAIN'
+  # Whitelist critical services:
+  - '@@||github.com^$important'
+  - '@@||torproject.org^$important'
+  - '@@||*.torproject.org^$important'
+  - '@@||accounts.google.com^$important'
