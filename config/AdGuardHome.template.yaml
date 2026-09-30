@@ -423,3 +423,7 @@ user_rules:
   - '@@||amazonaws.com^$important'
   - '@@||cloudfront.net^$important'
   - '@@||github.io^$important'
+  - '@@||teams.microsoft.com^$important'
+  - '@@||teams.live.com^$important'
+  - '@@||statics.teams.cdn.office.net^$important'
+  - '@@||config.teams.microsoft.com^$important'
