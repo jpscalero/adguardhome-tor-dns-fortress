@@ -1,6 +1,14 @@
 const fs = require('fs');
+const path = require('path');
 
-const CONFIG_PATH = 'C:\\AdGuardHome\\AdGuardHome.yaml';
+const ADGUARD_DIR = process.env.FORTRESS_DIR || 'C:\\AdGuardHome';
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ADGUARD_DIR, 'AdGuardHome.yaml');
+
+if (!fs.existsSync(CONFIG_PATH)) {
+  console.error(`❌ Error: Configuration file not found at ${CONFIG_PATH}`);
+  process.exit(1);
+}
+
 let yaml = fs.readFileSync(CONFIG_PATH, 'utf8');
 
 // 1. Add Quad9 DoQ to upstream_dns if not present

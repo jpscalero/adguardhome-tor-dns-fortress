@@ -1,7 +1,15 @@
 const fs = require('fs');
+const path = require('path');
 
-const path = 'C:\\AdGuardHome\\AdGuardHome.yaml';
-let yaml = fs.readFileSync(path, 'utf8');
+const ADGUARD_DIR = process.env.FORTRESS_DIR || 'C:\\AdGuardHome';
+const configPath = process.env.CONFIG_PATH || path.join(ADGUARD_DIR, 'AdGuardHome.yaml');
+
+if (!fs.existsSync(configPath)) {
+  console.error(`❌ Error: Configuration file not found at ${configPath}`);
+  process.exit(1);
+}
+
+let yaml = fs.readFileSync(configPath, 'utf8');
 
 // Update ratelimit and whitelist
 yaml = yaml.replace(/ratelimit: 0/, 'ratelimit: 40');
@@ -23,5 +31,5 @@ const newBootstrap = [
 
 yaml = yaml.replace(/bootstrap_dns:[\s\S]*?fallback_dns:/, newBootstrap + '\n  fallback_dns:');
 
-fs.writeFileSync(path, yaml, 'utf8');
-console.log('AdGuardHome.yaml successfully updated with ratelimit and encrypted bootstrap.');
+fs.writeFileSync(configPath, yaml, 'utf8');
+console.log(`AdGuardHome.yaml at ${configPath} successfully updated with ratelimit and encrypted bootstrap.`);

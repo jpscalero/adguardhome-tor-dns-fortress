@@ -1,7 +1,18 @@
 const fs = require('fs');
+const path = require('path');
 
-const CONFIG_PATH = 'C:\\AdGuardHome\\AdGuardHome.yaml';
+const ADGUARD_DIR = process.env.FORTRESS_DIR || 'C:\\AdGuardHome';
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ADGUARD_DIR, 'AdGuardHome.yaml');
+
+if (!fs.existsSync(CONFIG_PATH)) {
+  console.error(`❌ Error: Configuration file not found at ${CONFIG_PATH}`);
+  process.exit(1);
+}
+
 let yaml = fs.readFileSync(CONFIG_PATH, 'utf8');
+
+const certPath = path.join(ADGUARD_DIR, 'cert.pem').replace(/\\/g, '\\\\');
+const keyPath = path.join(ADGUARD_DIR, 'key.pem').replace(/\\/g, '\\\\');
 
 // 1. Enable Local TLS (DoH on 443, DoT on 853, DoQ on 853)
 const newTls = [
@@ -16,8 +27,8 @@ const newTls = [
   '  dnscrypt_config_file: ""',
   '  certificate_chain: ""',
   '  private_key: ""',
-  '  certificate_path: "C:\\\\AdGuardHome\\\\cert.pem"',
-  '  private_key_path: "C:\\\\AdGuardHome\\\\key.pem"',
+  `  certificate_path: "${certPath}"`,
+  `  private_key_path: "${keyPath}"`,
   '  strict_sni_check: false'
 ].join('\n');
 yaml = yaml.replace(/tls:[\s\S]*?querylog:/, newTls + '\nquerylog:');
@@ -57,4 +68,4 @@ const highRiskTldRules = `  # Bloqueo de TLDs de Alto Riesgo (Phishing, Malware,
 yaml = yaml.replace(/^user_rules:\r?\n/m, `user_rules:\n${highRiskTldRules}`);
 
 fs.writeFileSync(CONFIG_PATH, yaml, 'utf8');
-console.log('AdGuardHome.yaml updated with Local TLS, Amnesic Querylog, and High-Risk TLD blocks.');
+console.log(`AdGuardHome.yaml at ${CONFIG_PATH} updated with Local TLS, Amnesic Querylog, and High-Risk TLD blocks.`);

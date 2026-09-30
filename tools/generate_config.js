@@ -1,7 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
-const originalFile = 'C:\\AdGuardHome\\AdGuardHome.yaml';
+const ADGUARD_DIR = process.env.FORTRESS_DIR || 'C:\\AdGuardHome';
+const originalFile = process.env.CONFIG_SOURCE || process.argv[2] || path.join(ADGUARD_DIR, 'AdGuardHome.yaml');
+const targetFile = process.env.CONFIG_TARGET || process.argv[3] || path.join(ADGUARD_DIR, 'AdGuardHome_new.yaml');
+
+if (!fs.existsSync(originalFile)) {
+  console.error(`❌ Error: Original configuration file not found at ${originalFile}`);
+  console.error(`Please provide a valid file via FORTRESS_DIR, CONFIG_SOURCE, or CLI argument.`);
+  process.exit(1);
+}
+
 const original = fs.readFileSync(originalFile, 'utf8');
 const lines = original.split(/\r?\n/);
 
@@ -269,9 +278,17 @@ const newUserRules = `user_rules:
   - '||nimbus.bitdefender.net^'
   - '||catch-nimbus.bitdefender.net^$important'`;
 
-// dhcp to end is line 362 (index 361) to end
-const tail = lines.slice(361).join('\n');
+// Dynamic tail detection (sections after filters/user_rules like dhcp:, clients:, etc.)
+let tailIndex = -1;
+for (let i = 21; i < lines.length; i++) {
+  const line = lines[i];
+  if (/^[a-z_]+:/.test(line) && (line.startsWith('dhcp:') || line.startsWith('clients:') || line.startsWith('tls:'))) {
+    tailIndex = i;
+    break;
+  }
+}
+const tail = tailIndex !== -1 ? lines.slice(tailIndex).join('\n') : (lines.length > 361 ? lines.slice(361).join('\n') : '');
 
 const fullNewConfig = [head, newDns, middle, newFilters, whitelist, newUserRules, tail].join('\n');
-fs.writeFileSync('C:\\AdGuardHome\\AdGuardHome_new.yaml', fullNewConfig, 'utf8');
-console.log('Successfully written C:\\AdGuardHome\\AdGuardHome_new.yaml');
+fs.writeFileSync(targetFile, fullNewConfig, 'utf8');
+console.log(`Successfully written ${targetFile}`);

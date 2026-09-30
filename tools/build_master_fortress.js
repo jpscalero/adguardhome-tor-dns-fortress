@@ -1,6 +1,21 @@
 const fs = require('fs');
+const path = require('path');
 
-const originalFile = 'C:\\AdGuardHome\\AdGuardHome.yaml.bak';
+const ADGUARD_DIR = process.env.FORTRESS_DIR || 'C:\\AdGuardHome';
+let originalFile = process.env.CONFIG_SOURCE || process.argv[2] || path.join(ADGUARD_DIR, 'AdGuardHome.yaml.bak');
+const outputFile = process.env.CONFIG_TARGET || process.argv[3] || path.join(ADGUARD_DIR, 'AdGuardHome_fortress.yaml');
+
+if (!fs.existsSync(originalFile)) {
+  const fallback = path.join(ADGUARD_DIR, 'AdGuardHome.yaml');
+  if (fs.existsSync(fallback)) {
+    originalFile = fallback;
+  } else {
+    console.error(`❌ Error: Source file not found at ${originalFile}`);
+    console.error('Please specify a valid source config file via FORTRESS_DIR, CONFIG_SOURCE, or CLI argument.');
+    process.exit(1);
+  }
+}
+
 const original = fs.readFileSync(originalFile, 'utf8');
 const lines = original.split(/\r?\n/);
 
@@ -447,8 +462,17 @@ const newUserRules = `user_rules:
   - '||nimbus.bitdefender.net^'
   - '||catch-nimbus.bitdefender.net^$important'`;
 
-// Tail starting from dhcp (line 362, index 361)
-let tail = lines.slice(361).join('\n');
+// Tail detection: dynamically find top-level key after user_rules/filters (dhcp:, clients:, etc.)
+let tailIndex = -1;
+for (let i = 21; i < lines.length; i++) {
+  const line = lines[i];
+  if (/^[a-z_]+:/.test(line) && (line.startsWith('dhcp:') || line.startsWith('clients:'))) {
+    tailIndex = i;
+    break;
+  }
+}
+let tail = tailIndex !== -1 ? lines.slice(tailIndex).join('\n') : (lines.length > 361 ? lines.slice(361).join('\n') : '');
+
 // Update rewrites in tail if custom IP is provided
 const localIp = process.env.LOCAL_IP || '__YOUR_LOCAL_IP__';
 tail = tail.replaceAll('192.168.0.125', localIp);
@@ -456,5 +480,14 @@ tail = tail.replaceAll('192.168.0.125', localIp);
 tail = tail.replace(/blocked_response_ttl: 60/, 'blocked_response_ttl: 1800');
 
 const fullFortress = [head, newDns, newTls, newQuerylog, newFilters, whitelist, newUserRules, tail].join('\n');
-fs.writeFileSync('C:\\AdGuardHome\\AdGuardHome_fortress.yaml', fullFortress, 'utf8');
-console.log('Successfully written C:\\AdGuardHome\\AdGuardHome_fortress.yaml');
+
+// Basic structural YAML validation
+const requiredKeys = ['http:', 'dns:', 'tls:', 'querylog:', 'filters:', 'user_rules:'];
+const missingKeys = requiredKeys.filter(k => !fullFortress.includes(k));
+if (missingKeys.length > 0) {
+  console.error(`❌ YAML Validation Error: Resulting config is missing essential sections: ${missingKeys.join(', ')}`);
+  process.exit(1);
+}
+
+fs.writeFileSync(outputFile, fullFortress, 'utf8');
+console.log(`Successfully written fortress configuration to ${outputFile}`);
