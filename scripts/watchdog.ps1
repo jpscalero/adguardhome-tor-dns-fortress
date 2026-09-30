@@ -152,6 +152,36 @@ while ($true) {
     }
 
     # --------------------------------------------------------------------------
+    # 2.2. DYNAMIC NETWORK INTERFACE SYNCHRONIZATION
+    # --------------------------------------------------------------------------
+    # Ensures AdGuard Home bind_hosts always matches the machine's current Wi-Fi/Ethernet IP
+    # Prevents daemon failure on DHCP lease renewal or network switching
+    try {
+        $activeIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
+            $_.InterfaceAlias -in @("Wi-Fi", "Ethernet") -and
+            $_.IPAddress -notlike "169.254*" -and
+            $_.IPAddress -ne "127.0.0.1"
+        }).IPAddress | Select-Object -First 1
+
+        $cfgPath = Join-Path $AdGuardDir "AdGuardHome.yaml"
+        if ($activeIp -and (Test-Path $cfgPath)) {
+            $cfg = Get-Content $cfgPath -Raw
+            if ($cfg -match "bind_hosts:\s*\r?\n\s*-\s*127\.0\.0\.1\s*\r?\n\s*-\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*\r?\n\s*-\s*::1") {
+                $boundIp = $Matches[1]
+                if ($boundIp -ne $activeIp) {
+                    Write-WatchdogLog "WARN" "Cambio de IP de red detectado ($boundIp -> $activeIp). Actualizando bind_hosts..."
+                    $cfg = $cfg.Replace($boundIp, $activeIp)
+                    Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8 -Force
+                    Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
+                    Write-WatchdogLog "HEAL" "[AUTO-REPAIR] AdGuard Home reconfigurado y reiniciado con la nueva IP activa ($activeIp)."
+                }
+            }
+        }
+    } catch {
+        Write-WatchdogLog "ERROR" "Error en sincronizacion dinamica de interfaz: $($_.Exception.Message)"
+    }
+
+    # --------------------------------------------------------------------------
     # 2.5. PORT 53 CONFLICT ARBITRATION (SharedAccess / ICS Fix)
     # --------------------------------------------------------------------------
     try {
@@ -209,6 +239,12 @@ while ($true) {
             } else {
                 Write-WatchdogLog "ERROR" "No se encontro el lanzador VBS para Centinela AI."
             }
+        } elseif ($aiProc.Count -gt 1) {
+            # Deduplicate multiple instances
+            $aiProc | Select-Object -Skip 1 | ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-WatchdogLog "WARN" "Terminada instancia duplicada de Centinela AI (PID: $($_.ProcessId))."
+            }
         }
     } catch {
         Write-WatchdogLog "ERROR" "Error comprobando Centinela AI: $($_.Exception.Message)"
@@ -237,6 +273,12 @@ while ($true) {
                 }
             } else {
                 Write-WatchdogLog "ERROR" "No se encontro el lanzador VBS para Decoy DNS."
+            }
+        } elseif ($decoyProc.Count -gt 1) {
+            # Deduplicate multiple instances
+            $decoyProc | Select-Object -Skip 1 | ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-WatchdogLog "WARN" "Terminada instancia duplicada de Decoy DNS (PID: $($_.ProcessId))."
             }
         }
     } catch {

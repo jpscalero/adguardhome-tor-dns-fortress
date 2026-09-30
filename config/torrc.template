@@ -20,6 +20,7 @@ StrictNodes 0
 # Onion Routing & DNS
 AutomapHostsOnResolve 1
 AutomapHostsSuffixes .onion,.exit
+VirtualAddrNetworkIPv4 10.192.0.0/10
 
 # Performance & Circuit Stability
 NumEntryGuards 3

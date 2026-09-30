@@ -1,10 +1,11 @@
 // ==============================================================================
-// 🛡️ AI DNS Centinela v2 — Gemini 3.5 Flash Lite + DGA + C2 Beaconing
+// 🛡️ AI DNS Centinela v2.1 — Gemini 3.5 Flash Lite + DGA + C2 Beaconing
 // ==============================================================================
 // Proactive AI sentinel that monitors AdGuard Home query logs in real-time.
 // Detects algorithmically-generated domains (DGA) via Shannon entropy and
 // periodic C2 beaconing via standard deviation heuristics.
 // Suspicious domains are confirmed by Gemini AI before blocking.
+// Includes anti-false-positive cloud filters, .onion exclusion, and memory pruning.
 // ==============================================================================
 
 const http = require('http');
@@ -57,7 +58,8 @@ const envPaths = [
   ENV_PATH,
   path.join(BASE_DIR, '.env'),
   path.join(__dirname, '..', '.env'),
-  path.join(__dirname, '..', 'config', '.env')
+  path.join(__dirname, '..', 'config', '.env'),
+  'C:\\AdGuardHome\\.env'
 ];
 for (const ep of envPaths) {
   if (fs.existsSync(ep)) {
@@ -103,6 +105,26 @@ function saveCache() {
 // ─── Domain Timestamp History for C2 Beacon Detection ───────────────────────
 const domainQueryTimes = new Map();
 
+// Evict inactive domains from query history to prevent memory leaks
+function pruneDomainQueryTimes() {
+  const maxAge = 30 * 60 * 1000; // 30 minutes
+  const now = Date.now();
+  for (const [domain, times] of domainQueryTimes.entries()) {
+    const newest = times[times.length - 1];
+    if (now - newest > maxAge) {
+      domainQueryTimes.delete(domain);
+    }
+  }
+  // Hard cap to 2000 entries
+  if (domainQueryTimes.size > 2000) {
+    let excess = domainQueryTimes.size - 2000;
+    for (const key of domainQueryTimes.keys()) {
+      if (excess-- <= 0) break;
+      domainQueryTimes.delete(key);
+    }
+  }
+}
+
 // ─── Shannon Entropy Calculation ────────────────────────────────────────────
 // H(X) = -Σ P(xi) * log2(P(xi))
 // DGA domains typically exhibit entropy > 3.8 with length > 12
@@ -122,15 +144,33 @@ function calculateEntropy(str) {
   return entropy;
 }
 
-// ─── Benign Domains Allowlist ───────────────────────────────────────────────
-// Common reputable domains that never need AI analysis
+// ─── Apex / Registrable Domain Extraction ────────────────────────────────────
+// Extracts the actual registered label (SLD) rather than subdomains or container IDs
+function extractApexLabel(domain) {
+  const parts = domain.split('.');
+  if (parts.length <= 1) return parts[0];
+  // Common 2-part ccTLDs
+  const twoPartTlds = ['co.uk', 'com.es', 'org.es', 'nom.es', 'com.br', 'co.jp', 'com.au', 'co.nz'];
+  const lastTwo = parts.slice(-2).join('.');
+  if (twoPartTlds.includes(lastTwo) && parts.length >= 3) {
+    return parts[parts.length - 3];
+  }
+  return parts[parts.length - 2];
+}
+
+// ─── Benign Domains & Developer Allowlist ────────────────────────────────────
+// Reputable ecosystems, cloud platforms, and package repositories
 const BENIGN_ROOTS = [
   'google.com', 'googleapis.com', 'gstatic.com', 'googleusercontent.com', 'youtube.com',
-  'microsoft.com', 'windows.com', 'live.com', 'office.com', 'azure.com', 'github.com',
-  'apple.com', 'icloud.com', 'cloudflare.com', 'quad9.net', 'mullvad.net',
+  'google', 'antigravity.google', 'run.app', 'gcr.io', 'pkg.dev',
+  'microsoft.com', 'windows.com', 'live.com', 'office.com', 'azure.com', 'azure.net', 'azurewebsites.net',
+  'github.com', 'github.io', 'gitlab.com', 'apple.com', 'icloud.com',
+  'cloudflare.com', 'pages.dev', 'quad9.net', 'mullvad.net',
   'steamcommunity.com', 'steampowered.com', 'discord.com', 'discordapp.com',
-  'spotify.com', 'netflix.com', 'amazon.com', 'adguard-dns.com', 'adguard.com',
-  'wikipedia.org', 'bitdefender.net'
+  'spotify.com', 'netflix.com',
+  'amazon.com', 'amazonaws.com', 'cloudfront.net', 'akamaized.net', 'fastly.net',
+  'docker.com', 'docker.io', 'npmjs.org', 'npmjs.com', 'npm.org',
+  'adguard-dns.com', 'adguard.com', 'wikipedia.org', 'bitdefender.net'
 ];
 
 function isKnownBenign(domain) {
@@ -181,13 +221,13 @@ function aghRequest(endpoint, method = 'GET', body = null) {
 }
 
 // ─── Gemini AI Threat Analysis ──────────────────────────────────────────────
-// Queries Gemini 3.5 Flash Lite to classify a domain as MALICIOUS or SAFE.
-// Falls back to SAFE on any error to avoid false positive blocking.
+// Queries Gemini API with contextual awareness of legitimate cloud hosts
 function askGemini(domain, details) {
   return new Promise((resolve) => {
     const prompt = `You are an elite cybersecurity threat analyst. Analyze this domain queried by a computer: "${domain}".
 Details: ${details}
-Look for Domain Generation Algorithms (DGA), botnet C2 beacons, infostealer beacons, phishing, or typosquatting.
+Analyze for Domain Generation Algorithms (DGA), botnet C2 beacons, infostealer beacons, phishing, or typosquatting.
+IMPORTANT: Legitimate cloud hosting, developer platforms, CDN hostnames, and hash-based deployment IDs (such as on Google Cloud, AWS, Azure, Cloudflare, GitHub) are SAFE unless there is strong evidence of malicious C2 activity or malware payload hosting.
 Reply with EXACTLY one word: "MALICIOUS" or "SAFE".`;
 
     const payload = JSON.stringify({
@@ -257,7 +297,7 @@ function detectBeaconing(times) {
     diffs.push((sorted[i] - sorted[i - 1]) / 1000); // Convert to seconds
   }
   const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-  // If queries happen between 10s and 300s apart (typical C2 jitter range)
+  // If queries happen between 10s and 300s apart (typical C2 interval range)
   if (avg >= 10 && avg <= 300) {
     const variance = diffs.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / diffs.length;
     const stddev = Math.sqrt(variance);
@@ -269,8 +309,13 @@ function detectBeaconing(times) {
   return null;
 }
 
-// ─── Main Scan Loop ─────────────────────────────────────────────────────────
+// ─── Main Scan Loop with Concurrency Lock ───────────────────────────────────
+let isScanning = false;
+
 async function scanRecentQueries() {
+  if (isScanning) return;
+  isScanning = true;
+
   try {
     const data = await aghRequest(`/control/querylog?limit=${QUERY_LIMIT}`);
     const logs = data.data || [];
@@ -280,7 +325,8 @@ async function scanRecentQueries() {
     for (const item of logs) {
       const qname = item.question?.name?.toLowerCase()?.trim();
       if (!qname) continue;
-      // Skip local, arpa, root, or very short queries
+
+      // Skip local, arpa, root, Tor hidden services, and known benign domains
       if (
         qname.length < 5 ||
         !qname.includes('.') ||
@@ -288,19 +334,19 @@ async function scanRecentQueries() {
         qname.endsWith('.local') ||
         qname.endsWith('.home') ||
         qname.endsWith('.lan') ||
+        qname.endsWith('.onion') || // Never flag Tor .onion 56-char base32 hashes
         isKnownBenign(qname)
       ) {
         continue;
       }
 
-      // Record timestamps for beaconing detection (uses original log time)
+      // Record timestamps for beaconing detection
       const itemTime = item.time ? new Date(item.time).getTime() : now;
       if (!domainQueryTimes.has(qname)) {
         domainQueryTimes.set(qname, []);
       }
       const times = domainQueryTimes.get(qname);
       times.push(itemTime);
-      // Keep only last 10 entries per domain
       if (times.length > 10) times.shift();
 
       // Only flag for entropy analysis if not already checked
@@ -309,18 +355,19 @@ async function scanRecentQueries() {
       }
     }
 
-    // ── Phase 1: Analyze New Domains (Entropy / DGA) ──
+    // ── Phase 1: Analyze New Domains (Entropy / DGA on Apex Domain) ──
     for (const domain of candidates) {
       checkedDomains.add(domain);
-      const parts = domain.split('.');
-      const base = parts[0];
-      const entropy = calculateEntropy(base);
 
-      const isSuspicious = entropy > 3.85 || (base.length > 20 && /\d/.test(base));
+      // Extract the registrable apex label instead of random container subdomains
+      const apexLabel = extractApexLabel(domain);
+      const entropy = calculateEntropy(apexLabel);
+
+      const isSuspicious = entropy > 3.85 || (apexLabel.length > 20 && /\d/.test(apexLabel));
 
       if (isSuspicious) {
-        log(`🔍 Inspeccionando dominio sospechoso por entropía (${entropy.toFixed(2)}): ${domain}`);
-        const verdict = await askGemini(domain, `Entropy: ${entropy.toFixed(2)}`);
+        log(`🔍 Inspeccionando dominio sospechoso por entropía apex (${entropy.toFixed(2)}): ${domain} [label: ${apexLabel}]`);
+        const verdict = await askGemini(domain, `Apex Label: "${apexLabel}", Entropy: ${entropy.toFixed(2)}`);
         log(`   🤖 Veredicto IA: ${verdict} para ${domain}`);
         if (verdict === 'MALICIOUS') {
           await blockDomain(domain);
@@ -330,8 +377,6 @@ async function scanRecentQueries() {
     }
 
     // ── Phase 2: Analyze C2 Beaconing Heuristics ──
-    // NOTE: Beaconing uses a separate namespace ("beacon:domain") so that
-    // entropy-checked domains can still accumulate timestamps for beaconing.
     for (const [domain, times] of domainQueryTimes.entries()) {
       if (checkedDomains.has(`beacon:${domain}`)) continue;
       const beacon = detectBeaconing(times);
@@ -347,14 +392,18 @@ async function scanRecentQueries() {
       }
     }
 
+    // Maintenance: prune old entries and persist cache
+    pruneDomainQueryTimes();
     saveCache();
   } catch (e) {
     log(`Aviso en escaneo: ${e.message}`);
+  } finally {
+    isScanning = false;
   }
 }
 
 // ─── Startup ────────────────────────────────────────────────────────────────
-log('🛡️ AI DNS Guard v2 (Gemini 3.5 Flash Lite + DGA + C2 Beaconing) activo.');
+log('🛡️ AI DNS Guard v2.1 (Gemini 3.5 Flash Lite + DGA Apex + C2 Beaconing + Cloud Protect) activo.');
 log(`   📁 Base: ${BASE_DIR}`);
 log(`   🔗 AdGuard Home: http://${AGH_HOST}:${AGH_PORT}`);
 log(`   ⏱️  Intervalo de escaneo: ${SCAN_INTERVAL_MS / 1000}s`);
