@@ -5,6 +5,7 @@
 [![DNS: DoH + Tor + DNSSEC](https://img.shields.io/badge/DNS-DoH%20%2B%20Tor%20%2B%20DNSSEC-brightgreen.svg)]()
 [![Evasion: GoodbyeDPI](https://img.shields.io/badge/Evasion-GoodbyeDPI-orange.svg)]()
 [![Defense: AI Sentinel](https://img.shields.io/badge/Defense-AI%20Sentinel%20%2B%20Decoy-purple.svg)]()
+[![CI / Security Audit](https://github.com/jpscalero/adguardhome-tor-dns-fortress/actions/workflows/main.yml/badge.svg)](https://github.com/jpscalero/adguardhome-tor-dns-fortress/actions/workflows/main.yml)
 
 > **Arquitectura de Máxima Privacidad y Evasión Anti-Censura para Windows 11 / 10:**  
 > Servidor DNS local **AdGuard Home** ultra-blindado, canalizado al 100% a través de **Tor SOCKS5**, con evasión **GoodbyeDPI**, centinela **IA en tiempo real**, **generador de tráfico señuelo** y **watchdog autorreparable**.
