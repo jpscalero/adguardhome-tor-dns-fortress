@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     1-Click Automated Setup for AdGuard Home + Tor DNS Privacy Fortress on Windows 11 / 10.
 .DESCRIPTION
@@ -37,9 +37,6 @@ try {
     Set-ItemProperty -Path $paramPath -Name 'EnableDNSMcast' -Value 0 -Type DWord -Force
     Set-ItemProperty -Path $paramPath -Name 'DnsDoneNotification' -Value 1 -Type DWord -Force
     
-    # Disable service driver DLL hijacking port 53
-    Set-ItemProperty -Path $paramPath -Name 'ServiceDll' -Value 'C:\WINDOWS\System32\ipnathlp.dll.disabled' -Force
-
     # Neutralize RPC triggers, failure recovery and disable service start
     & sc.exe triggerinfo SharedAccess delete 2>&1 | Out-Null
     & sc.exe failure SharedAccess reset= 0 actions= "" 2>&1 | Out-Null

@@ -19,10 +19,10 @@ DNS_PROBE_FINISHED_BAD_CONFIG
 
 ---
 
-## La Solución Técnica Aplicada
+## La Solución Técnica Aplicada (No Destructiva)
 
 ### 1. Desactivación nativa del Proxy DNS en `ipnathlp.dll`
-Mediante ingeniería inversa del binario `C:\Windows\System32\ipnathlp.dll` de Windows 11, identificamos el parámetro del registro que gobierna el listener DNS de ICS:
+Mediante los parámetros del registro de Windows que gobiernan el listener DNS de ICS, se desactiva el subcomponente DNS sin alterar los binarios ni drivers del sistema:
 ```powershell
 Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'IcsDnsEnabled' -Value 0 -Type DWord
 Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'EnableDNS' -Value 0 -Type DWord
@@ -30,20 +30,15 @@ Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Par
 Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'DnsDoneNotification' -Value 1 -Type DWord
 ```
 
-### 2. Neutralización del Driver en Segundo Plano
-Para evitar que procesos del sistema invoquen la DLL de forma involuntaria:
-```powershell
-Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'ServiceDll' -Value 'C:\WINDOWS\System32\ipnathlp.dll.disabled'
-```
-
-### 3. Eliminación de Desencadenadores RPC
+### 2. Eliminación de Desencadenadores RPC
+Para evitar que eventos de red o Hyper-V reactiven el servicio:
 ```cmd
 sc.exe triggerinfo SharedAccess delete
 sc.exe failure SharedAccess reset= 0 actions= ""
 sc.exe config SharedAccess start= disabled
 ```
 
-### 4. Asignación Explícita en AdGuard Home (`AdGuardHome.yaml`)
+### 3. Asignación Explícita en AdGuard Home (`AdGuardHome.yaml`)
 En lugar de `0.0.0.0`, se configuran las interfaces explícitas:
 ```yaml
 dns:
@@ -53,7 +48,7 @@ dns:
   port: 53
 ```
 
-### 5. Verificación
+### 4. Verificación
 Comprobar que el puerto 53 pertenece en exclusiva a `AdGuardHome.exe`:
 ```powershell
 Get-NetUDPEndpoint -LocalPort 53 | Select-Object LocalAddress, LocalPort, OwningProcess, @{N='Process'; E={(Get-Process -Id $_.OwningProcess).ProcessName}}
@@ -64,4 +59,22 @@ LocalAddress LocalPort OwningProcess Process
 ------------ --------- ------------- -------
 127.0.0.1           53          3628 AdGuardHome
 ::1                 53          3628 AdGuardHome
+```
+
+---
+
+## 🔄 Reversibilidad y Restauración del Sistema
+
+Si en algún momento necesitas revertir estos cambios para utilizar la función nativa de Windows de "Zona con cobertura inalámbrica móvil" o compartir internet con otros adaptadores:
+
+### Restaurar Parámetros de SharedAccess:
+```powershell
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'IcsDnsEnabled' -Value 1 -Type DWord
+sc.exe config SharedAccess start= demand
+```
+
+### Restauración de `ServiceDll` (si fue modificado en versiones anteriores):
+En versiones tempranas de esta guía se mencionaba cambiar `ServiceDll` por `ipnathlp.dll.disabled`. **Esta práctica ha sido desaconsejada y eliminada del instalador oficial**, ya que es innecesaria una vez configurado `IcsDnsEnabled=0`. Si tu sistema fue afectado previamente, puedes restaurar el valor original ejecutando en PowerShell como Administrador:
+```powershell
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'ServiceDll' -Value '%SystemRoot%\System32\ipnathlp.dll' -Type ExpandString
 ```

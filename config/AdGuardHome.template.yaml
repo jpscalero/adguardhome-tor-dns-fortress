@@ -28,7 +28,7 @@ users:
 auth_attempts: 3
 block_auth_min: 30
 
-# All upstream DNS requests travel encrypted through Tor Onion SOCKS5 proxy:
+# HTTP Proxy: Routes AdGuard Home management traffic (filter list downloads, version checks) through Tor:
 http_proxy: socks5://127.0.0.1:9050
 language: es
 theme: dark
@@ -53,36 +53,35 @@ dns:
     # - __YOUR_LOCAL_IP__
   refuse_any: true
 
-  # Multi-Jurisdiction Parallel DoH Resolvers (All Routed Through Tor SOCKS5):
+  # Multi-Jurisdiction Parallel DoH Resolvers (Routed explicitly through Tor SOCKS5 per upstream):
+  # NOTE: In AdGuard Home (v0.107.20+), adding socks5:// to the upstream URI ensures that actual user
+  # DNS query traffic travels encrypted through Tor, independent of http_proxy.
   upstream_dns:
     # Switzerland (Neutral, strict privacy laws)
-    - https://dns.digitale-gesellschaft.ch/dns-query
+    - '[https://dns.digitale-gesellschaft.ch/dns-query] socks5://127.0.0.1:9050'
     # Austria (Neutral EU, GDPR compliant)
-    - https://doh.applied-privacy.net/query
+    - '[https://doh.applied-privacy.net/query] socks5://127.0.0.1:9050'
     # Sweden (Mullvad zero-logs DoH)
-    - https://base.dns.mullvad.net/dns-query
+    - '[https://base.dns.mullvad.net/dns-query] socks5://127.0.0.1:9050'
     # Germany (DNS.SB, uncensored & zero-logs)
-    - https://doh.dns.sb/dns-query
+    - '[https://doh.dns.sb/dns-query] socks5://127.0.0.1:9050'
     # Global Swiss Foundation (Quad9, malicious domain filtering)
-    - https://dns.quad9.net/dns-query
+    - '[https://dns.quad9.net/dns-query] socks5://127.0.0.1:9050'
     # Cloudflare Security (1.1.1.2 malware blocking)
-    - https://security.cloudflare-dns.com/dns-query
+    - '[https://security.cloudflare-dns.com/dns-query] socks5://127.0.0.1:9050'
     # Control D (Malware & tracker blocking)
-    - https://freedns.controld.com/p2
+    - '[https://freedns.controld.com/p2] socks5://127.0.0.1:9050'
     # Native Tor .onion resolver integration
     - '[/onion/]127.0.0.1:5350'
 
   upstream_dns_file: ""
 
-  # Encrypted Bootstraps for Initial Connection Resolution:
+  # Bootstrap DNS: Literal IPs only (prevents circular dependency resolving bootstrap hostnames over SOCKS5):
   bootstrap_dns:
-    - https://9.9.9.9/dns-query
-    - https://1.1.1.2/dns-query
-    - tls://9.9.9.9
-    - tls://1.1.1.2
     - 9.9.9.9
-    - 149.112.112.112
     - 1.1.1.2
+    - 149.112.112.112
+    - 1.0.0.1
 
   fallback_dns:
     - 9.9.9.9
