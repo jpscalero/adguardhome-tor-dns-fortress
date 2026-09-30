@@ -122,13 +122,17 @@ Salida esperada:
 
 [1] Puerto 53 UDP vinculado exclusivamente a AdGuard Home... OK
 [2] Túnel Tor SOCKS5 en escucha (127.0.0.1:9050)... OK
-[3] Resolución DNS local en 127.0.0.1:53 (github.com)... (180ms) OK
-[4] Bloqueo activo de telemetría y dominios de riesgo (NXDOMAIN)... OK
-[5] Servicio GoodbyeDPI (Anti-DPI / WinDivert)... OK
-[6] Adaptadores principales configurados con DNS 127.0.0.1... OK
+[3] Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)... OK
+[4] Resolución DNS local en 127.0.0.1:53 (github.com)... (159ms) OK
+[5] Resolución nativa de dominios Tor .onion (Virtual IP 10.x.x.x)... OK
+[6] Bloqueo activo de telemetría y dominios de riesgo (NXDOMAIN)... OK
+[7] Servicio GoodbyeDPI (Anti-DPI / WinDivert)... OK
+[8] Centinela AI de detección DGA/C2 (ai_dns_guard.js)... OK
+[9] Generador de tráfico señuelo anti-fingerprinting (decoy_dns.js)... OK
+[10] Neutralización de secuestro de puerto 53 (SharedAccess/ICS)... OK
 
 ==========================================================
-   ✅ TODAS LAS PRUEBAS SUPERADAS (6/6): FORTALEZA ACTIVA
+   ✅ TODAS LAS PRUEBAS SUPERADAS (10/10): FORTALEZA ACTIVA
 ==========================================================
 ```
 

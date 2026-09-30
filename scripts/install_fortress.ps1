@@ -78,13 +78,49 @@ if (-not (Test-Path $targetConfig) -or $Force) {
     Write-Host "  -> Archivo de configuración existente detectado en $targetConfig. Manteniendo configuración existente." -ForegroundColor Cyan
 }
 
-# 3. Copy scripts to AdGuardHome directory
-Write-Host "[3/6] Desplegando scripts de Centinela AI, Decoy y Watchdog..." -ForegroundColor Yellow
-$scriptsToCopy = @("watchdog.ps1", "ai_dns_guard.js", "decoy_dns.js")
+# 2.5. Tor Configuration Deployment
+Write-Host "[2.5/6] Verificando y desplegando configuración de Tor..." -ForegroundColor Yellow
+$torPaths = @("C:\Tor\torrc", "C:\Program Files\Tor\torrc")
+$torTemplate = Join-Path $repoRoot "config\torrc.template"
+if (Test-Path $torTemplate) {
+    foreach ($tp in $torPaths) {
+        $tDir = Split-Path $tp
+        if (Test-Path $tDir) {
+            if ((-not (Test-Path $tp)) -or $Force) {
+                Copy-Item -Path $torTemplate -Destination $tp -Force
+                Write-Host "  -> Configuración de Tor desplegada en $tp" -ForegroundColor Green
+            }
+        }
+    }
+}
+
+# 3. Copy scripts, launchers and diagnostic suite to AdGuardHome directory
+Write-Host "[3/6] Desplegando scripts de Centinela AI, Decoy, Watchdog y Lanzadores..." -ForegroundColor Yellow
+$scriptsToCopy = @("watchdog.ps1", "ai_dns_guard.js", "decoy_dns.js", "test_fortress.ps1")
 foreach ($s in $scriptsToCopy) {
     $src = Join-Path $repoRoot "scripts\$s"
     if (Test-Path $src) {
         Copy-Item -Path $src -Destination (Join-Path $TargetDir $s) -Force
+    }
+}
+
+# Deploy silent VBS launchers with aliases
+$launchersDir = Join-Path $repoRoot "launchers"
+if (Test-Path $launchersDir) {
+    Get-ChildItem -Path $launchersDir -Filter "*.vbs" | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination (Join-Path $TargetDir $_.Name) -Force
+    }
+    # Ensure standard aliases for watchdog compatibility
+    $aliasMap = @{
+        "start_ai_guard.vbs" = "ocultar_guardia.vbs"
+        "start_decoy.vbs"    = "ocultar_decoy.vbs"
+    }
+    foreach ($srcName in $aliasMap.Keys) {
+        $srcPath = Join-Path $TargetDir $srcName
+        $dstPath = Join-Path $TargetDir $aliasMap[$srcName]
+        if ((Test-Path $srcPath) -and (-not (Test-Path $dstPath))) {
+            Copy-Item -Path $srcPath -Destination $dstPath -Force
+        }
     }
 }
 
@@ -99,6 +135,19 @@ foreach ($adapter in $adapters) {
 }
 Clear-DnsClientCache
 Write-Host "  -> Caché DNS de Windows purgada." -ForegroundColor Green
+
+# 4.5. Anti-Bypass Windows Firewall Rules (Prevent Direct Outbound Plaintext DNS Leaks)
+Write-Host "[4.5/6] Configurando reglas de firewall anti-fugas (bloqueo de bypass UDP/TCP 53 saliente)..." -ForegroundColor Yellow
+$fwRules = @(
+    @{ Name = "AdGuard_Block_Outbound_DNS_UDP"; Display = "AdGuard - Block Outbound Plaintext DNS UDP"; Protocol = "UDP"; Port = 53 },
+    @{ Name = "AdGuard_Block_Outbound_DNS_TCP"; Display = "AdGuard - Block Outbound Plaintext DNS TCP"; Protocol = "TCP"; Port = 53 }
+)
+foreach ($r in $fwRules) {
+    if (-not (Get-NetFirewallRule -Name $r.Name -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name $r.Name -DisplayName $r.Display -Direction Outbound -Action Block -Protocol $r.Protocol -RemotePort $r.Port -Enabled True | Out-Null
+        Write-Host "  -> Regla de bloqueo saliente '$($r.Display)' configurada." -ForegroundColor Green
+    }
+}
 
 # 5. Register Watchdog Scheduled Task
 Write-Host "[5/6] Registrando tarea programada de autorrecuperación (Watchdog)..." -ForegroundColor Yellow
