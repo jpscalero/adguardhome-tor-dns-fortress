@@ -14,6 +14,8 @@
 
 ## 🏛️ Diagrama de Arquitectura
 
+> 📖 *Para el modelo de amenazas detallado y el diseño formal de seguridad, consulta [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) y la [Wiki Oficial](https://github.com/jpscalero/adguardhome-tor-dns-fortress/wiki/Arquitectura-y-Flujo-de-Datos).*
+
 ```mermaid
 flowchart TD
     subgraph Host ["💻 Host Local (Windows 11)"]
@@ -139,6 +141,21 @@ Salida esperada:
 
 ---
 
+## ⚠️ Riesgos Conocidos y Limitaciones Operativas
+
+Antes de desplegar la fortaleza en entornos de producción o estaciones de juego diario, ten en cuenta los siguientes aspectos técnicos:
+
+1. **Impacto de GoodbyeDPI / WinDivert en Anticheats y EDRs**:
+   - GoodbyeDPI utiliza el driver de filtrado de paquetes a nivel de kernel [WinDivert](https://reqrypt.org/windivert.html).
+   - Algunos sistemas antitrampas de videojuegos modernos (e.g. *Vanguard*, *Easy Anti-Cheat*, *BattlEye*) o soluciones EDR corporativas pueden detectar la presencia o inyección de paquetes de WinDivert como actividad anómala o conflicto de hooks. Si experimentas incompatibilidades, puedes pausar o desinstalar el servicio GoodbyeDPI sin afectar a la resolución DNS local por Tor.
+2. **Latencia Inicial de Resolución DNS por Tor**:
+   - Las consultas DNS que pasan a través de los tres saltos de la red Tor experimentan una latencia típica de entre **200 ms y 800 ms** en la primera consulta (miss de caché).
+   - No obstante, gracias a la **Caché Optimista en RAM** (32 MB / 100.000+ registros), las consultas posteriores a dominios frecuentes se resuelven de forma instantánea en **0 ms**, refrescando en segundo plano sin penalizar la experiencia de navegación del usuario.
+3. **Bloqueo Preventivo de TLDs de Alto Riesgo (`.zip`, `.mov`, etc.)**:
+   - La configuración por defecto bloquea dominios que emplean TLDs frecuentemente asociados con campañas de phishing y suplantación de extensiones de archivos (`.zip`, `.mov`, `.country`, `.kim`, `.gdn`, `.stream`, etc.). Si necesitas acceder a algún sitio corporativo legítimo bajo estos TLDs, puedes añadir una regla de excepción en `Filtros -> Reglas personalizadas` en el panel web de AdGuard Home (ej: `@@||ejemplo.zip^`).
+
+---
+
 ## 📁 Estructura del Repositorio
 
 ```text
@@ -166,6 +183,9 @@ adguardhome-tor-dns-fortress/
 │   ├── apply_maximum_hardening.js   # Inyector de protección Bogus NXDOMAIN y TTL
 │   ├── apply_server_security_privacy.js # Restricciones de red privada y rate limiting
 │   └── update_adguard_settings.js   # Actualizador selectivo de reglas y bootstraps
+├── CHANGELOG.md                     # Registro detallado de versiones y correcciones
+├── CONTRIBUTING.md                  # Guía de contribución y estándares del código
+├── SECURITY.md                      # Política de seguridad y reporte de vulnerabilidades
 ├── .gitignore                       # Protección estricta de credenciales, logs y claves
 ├── LICENSE                          # Licencia MIT
 └── package.json                     # Metadatos del proyecto
@@ -193,5 +213,8 @@ Toda la documentación técnica exhaustiva está disponible en la **[Wiki Oficia
 ## 👤 Autor
 * **jpscalero** - [GitHub](https://github.com/jpscalero)
 
-## 📄 Licencia
-Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+## 📄 Licencia y Políticas
+* **Licencia**: Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+* **Historial de Cambios**: Consulta [CHANGELOG.md](CHANGELOG.md).
+* **Seguridad y Reportes**: Consulta [SECURITY.md](SECURITY.md).
+* **Guía de Contribución**: Consulta [CONTRIBUTING.md](CONTRIBUTING.md).
