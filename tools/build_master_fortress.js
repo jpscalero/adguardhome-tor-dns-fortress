@@ -19,8 +19,8 @@ const head = `http:
   address: 0.0.0.0:80
   session_ttl: 24h
 users:
-  - name: jpscalero
-    password: $2a$10$buBXBIGX4topoqe9RCDqoOvKWSgSiks8LZck.O5cC62Stonu8wrXK
+  - name: __YOUR_USERNAME__
+    password: __YOUR_BCRYPT_HASH__
 auth_attempts: 3
 block_auth_min: 30
 http_proxy: ""
@@ -37,10 +37,9 @@ const newDns = `dns:
   ratelimit_subnet_len_ipv6: 56
   ratelimit_whitelist:
     - 127.0.0.1
-    - 192.168.0.112
-    - 192.168.0.125
-    - 192.168.0.185
-    - 192.168.0.231
+    - __YOUR_LOCAL_IP__
+    # Add additional trusted LAN IPs below:
+    # - 192.168.x.x
   refuse_any: true
   upstream_dns:
     - https://base.dns.mullvad.net/dns-query
@@ -132,7 +131,7 @@ const newDns = `dns:
     - ::1/128
   use_private_ptr_resolvers: true
   local_ptr_upstreams:
-    - 192.168.0.1
+    - __YOUR_GATEWAY_IP__
   use_dns64: false
   dns64_prefixes: []
   serve_http3: false
@@ -450,8 +449,9 @@ const newUserRules = `user_rules:
 
 // Tail starting from dhcp (line 362, index 361)
 let tail = lines.slice(361).join('\n');
-// Update rewrites in tail from 192.168.0.125 to 192.168.0.112
-tail = tail.replaceAll('192.168.0.125', '192.168.0.112');
+// Update rewrites in tail if custom IP is provided
+const localIp = process.env.LOCAL_IP || '__YOUR_LOCAL_IP__';
+tail = tail.replaceAll('192.168.0.125', localIp);
 // Update blocked_response_ttl: 60 to 1800
 tail = tail.replace(/blocked_response_ttl: 60/, 'blocked_response_ttl: 1800');
 

@@ -4,7 +4,7 @@
 # ==============================================================================
 
 # Core Network & Ports
-SocksPort 127.0.0.1:9050
+SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort
 DNSPort 127.0.0.1:5350
 
 # Isolate traffic per client connection & credentials
@@ -26,7 +26,14 @@ NumEntryGuards 3
 CircuitBuildTimeout 10
 KeepalivePeriod 60
 NewCircuitPeriod 30
-MaxCircuitDirtiness 600
+MaxCircuitDirtiness 180
+
+# Traffic Analysis Resistance
+ConnectionPadding 1
+EnforceDistinctSubnets 1
+
+# Minimize Disk Writes (SSD protection + forensic resistance)
+AvoidDiskWrites 1
 
 # Prevent local DNS / IPv6 leaks
 TestSocks 0

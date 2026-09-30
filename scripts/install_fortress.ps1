@@ -40,7 +40,13 @@ try {
     # Disable service driver DLL hijacking port 53
     Set-ItemProperty -Path $paramPath -Name 'ServiceDll' -Value 'C:\WINDOWS\System32\ipnathlp.dll.disabled' -Force
 
-    # Stop any running SharedAccess svchost instances
+    # Neutralize RPC triggers, failure recovery and disable service start
+    & sc.exe triggerinfo SharedAccess delete 2>&1 | Out-Null
+    & sc.exe failure SharedAccess reset= 0 actions= "" 2>&1 | Out-Null
+    & sc.exe config SharedAccess start= disabled 2>&1 | Out-Null
+    Stop-Service SharedAccess -Force -ErrorAction SilentlyContinue
+
+    # Stop any running SharedAccess svchost instances holding port 53
     $endpoints = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue
     foreach ($ep in $endpoints) {
         $p = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
@@ -48,7 +54,7 @@ try {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
         }
     }
-    Write-Host "  -> Puerto 53 liberado con éxito." -ForegroundColor Green
+    Write-Host "  -> Puerto 53 liberado y desencadenadores neutralizados con éxito." -ForegroundColor Green
 } catch {
     Write-Warning "  -> Error aplicando configuración de SharedAccess: $($_.Exception.Message)"
 }

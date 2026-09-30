@@ -7,7 +7,7 @@ let yaml = fs.readFileSync(path, 'utf8');
 yaml = yaml.replace(/ratelimit: 0/, 'ratelimit: 40');
 yaml = yaml.replace(
   /ratelimit_whitelist: \[\]/,
-  'ratelimit_whitelist:\n    - 127.0.0.1\n    - 192.168.0.125\n    - 192.168.0.185\n    - 192.168.0.231'
+  'ratelimit_whitelist:\n    - 127.0.0.1\n    # Add your trusted local client IPs here, e.g.:\n    # - 192.168.1.100'
 );
 
 // Update bootstrap_dns

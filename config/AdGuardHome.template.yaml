@@ -1,5 +1,5 @@
 # ==============================================================================
-# Ultra-Hardened AdGuard Home Master Configuration Template
+# 🛡️ Ultra-Hardened AdGuard Home Master Configuration Template
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # License: MIT
@@ -16,8 +16,9 @@ http:
       - GET /dns-query/{ClientID}
       - POST /dns-query/{ClientID}
     insecure_enabled: false
-  address: 127.0.0.1:80
-  session_ttl: 1d
+  # Set to 127.0.0.1:80 for local only, or 0.0.0.0:80 to serve LAN clients:
+  address: 0.0.0.0:80
+  session_ttl: 24h
 
 users:
   - name: admin
@@ -29,7 +30,7 @@ block_auth_min: 30
 
 # All upstream DNS requests travel encrypted through Tor Onion SOCKS5 proxy:
 http_proxy: socks5://127.0.0.1:9050
-language: en
+language: es
 theme: dark
 
 dns:
@@ -37,6 +38,8 @@ dns:
   bind_hosts:
     - 127.0.0.1
     - '::1'
+    # Add your local network interface IP here (e.g., 192.168.1.100) if serving LAN:
+    # - __YOUR_LOCAL_IP__
   port: 53
 
   # Privacy & Anonymization Hardening:
@@ -46,6 +49,8 @@ dns:
   ratelimit_subnet_len_ipv6: 56
   ratelimit_whitelist:
     - 127.0.0.1
+    # Add trusted LAN client IPs here:
+    # - __YOUR_LOCAL_IP__
   refuse_any: true
 
   # Multi-Jurisdiction Parallel DoH Resolvers (All Routed Through Tor SOCKS5):
@@ -113,8 +118,8 @@ dns:
   cache_ttl_min: 300
   cache_ttl_max: 86400
   cache_optimistic: true
-  cache_optimistic_answer_ttl: 1m
-  cache_optimistic_max_age: 1d
+  cache_optimistic_answer_ttl: 60s
+  cache_optimistic_max_age: 24h
 
   # ISP DNS Hijack Detection & Bogus NXDOMAIN Redirection:
   bogus_nxdomain:
@@ -146,15 +151,25 @@ dns:
   hostsfile_enabled: true
   pending_requests:
     enabled: true
+  blocked_response_ttl: 1800
 
+# Local TLS (DoH, DoT, DoQ) - Optional: generate self-signed cert or Let's Encrypt
 tls:
   enabled: false
-  server_name: ""
+  server_name: "adguard.home"
   force_https: false
   port_https: 443
   port_dns_over_tls: 853
   port_dns_over_quic: 853
+  port_dnscrypt: 0
+  dnscrypt_config_file: ""
+  certificate_chain: ""
+  private_key: ""
+  certificate_path: ""
+  private_key_path: ""
+  strict_sni_check: false
 
+# Amnesic Zero-Disk Querylog (Anti-Forensics: 1h retention, 500 items max in RAM only):
 querylog:
   dir_path: ""
   ignored:
@@ -169,64 +184,235 @@ querylog:
     - 100.51.198.in-addr.arpa
     - 113.0.203.in-addr.arpa
     - 255.255.255.255.in-addr.arpa
-  interval: 2160h
-  size_memory: 1000
+  interval: 1h
+  size_memory: 500
   enabled: true
-  file_enabled: true
+  ignored_enabled: true
+  file_enabled: false
 
 statistics:
   dir_path: ""
   ignored: []
-  interval: 2160h
+  interval: 7d
   enabled: true
+  ignored_enabled: false
 
+# Master Threat Feeds (27 High-Efficiency Curated Lists):
 filters:
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
-    name: AdGuard DNS Filter
-    id: 1
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.plus.plus.txt
+    name: HaGeZi Pro++ (Ultimate Protection)
+    id: 1788277954
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
-    name: AdAway Default Blocklist
-    id: 2
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_52.txt
+    name: HaGeZi Encrypted DNS/VPN/TOR/Proxy Bypass
+    id: 1788277986
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_5.txt
-    name: OISD Blocklist Small
-    id: 5
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_44.txt
+    name: HaGeZi Threat Intelligence Feeds
+    id: 1788277988
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
-    name: The Big Blocklist
-    id: 9
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/dyndns.txt
+    name: HaGeZi Dynamic DNS (DynDNS) Blocklist
+    id: 1788278001
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt
-    name: MalwareDomainList.com
-    id: 11
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/fake.txt
+    name: HaGeZi Fake, Scam and Typosquatting
+    id: 1788278020
+  - enabled: true
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/native.winstuff.txt
+    name: HaGeZi Windows Native Spyware & Telemetry
+    id: 1788278021
+  - enabled: true
+    url: https://raw.githubusercontent.com/blocklistproject/Lists/master/ransomware.txt
+    name: Blocklist.site Ransomware Protection
+    id: 1788278010
+  - enabled: true
+    url: https://raw.githubusercontent.com/blocklistproject/Lists/master/fraud.txt
+    name: Blocklist.site Fraud & Scam Protection
+    id: 1788278011
+  - enabled: true
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/popupads.txt
+    name: HaGeZi Popup and Adware Blocklist
+    id: 1788278012
+  - enabled: true
+    url: https://threatfox.abuse.ch/downloads/hostfile/
+    name: ThreatFox Malware & Botnet C2 (abuse.ch)
+    id: 1788278002
+  - enabled: true
+    url: https://urlhaus.abuse.ch/downloads/hostfile/
+    name: Malicious URL Blocklist (URLhaus)
+    id: 4
+  - enabled: true
+    url: https://phishing.army/download/phishing_army_blocklist_extended.txt
+    name: Phishing Army Extended
+    id: 6
   - enabled: true
     url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt
-    name: Phishing Army
-    id: 30
+    name: Phishing URL Blocklist (PhishTank and OpenPhish)
+    id: 1788277983
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
-    name: Scam Blocklist by Dandelion Sprout
-    id: 31
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt
+    name: Dandelion Sprout Anti-Malware List
+    id: 1788277984
+  - enabled: true
+    url: https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt
+    name: WindowsSpyBlocker (Telemetry & Spy)
+    id: 12
+  - enabled: true
+    url: https://big.oisd.nl
+    name: OISD Big (Zero False-Positive Protection)
+    id: 1788278003
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS filter
+    id: 1
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt
+    name: AdGuard Tracking Protection Filter
+    id: 3
+  - enabled: true
+    url: https://someonewhocares.org/hosts/hosts
+    name: Dan Pollock Someonewhocares Hosts
+    id: 1788278022
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt
+    name: uBlock0 filters - Badware risks
+    id: 1788277996
   - enabled: true
     url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt
-    name: WindowsSpyBlocker - Hosts spy rules
-    id: 42
+    name: ShadowWhisperer Malware List
+    id: 1788277993
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
+    name: Stalkerware Indicators List
+    id: 1788277994
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
+    name: The Big List of Hacked Malware Web Sites
+    id: 1788277995
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt
+    name: Scam Blocklist by DurableNapkin
+    id: 1788277992
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt
+    name: NoCoin Filter List (Anti-Cryptomining)
+    id: 1788277990
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_68.txt
+    name: HaGeZi URL Shortener Blocklist
+    id: 1788277989
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt
+    name: HaGeZi Allowlist Referral
+    id: 1788277955
+
+whitelist_filters: []
 
 user_rules:
-  # Block WPAD auto-proxy exploit vectors:
-  - '||wpad.*^=NXDOMAIN'
-  - '||wpad^=NXDOMAIN'
-  # Block dangerous TLDs often abused in phishing/malware delivery:
-  - '||*.zip^$deny'
-  - '||*.mov^$deny'
-  # Block Apple Private Relay / Firefox DoH canary to force fortress resolution:
+  # ==========================================
+  # CANARIOS ANTI-BYPASS DE NAVEGADORES Y APPLE
+  # ==========================================
   - '||use-application-dns.net^$dnsrewrite=NXDOMAIN'
   - '||mask.icloud.com^$dnsrewrite=NXDOMAIN'
   - '||mask-h2.icloud.com^$dnsrewrite=NXDOMAIN'
-  # Whitelist critical services:
+  - '||wpad.*^$dnsrewrite=NXDOMAIN'
+  - '||wpad^$dnsrewrite=NXDOMAIN'
+
+  # ==========================================
+  # BLOQUEO DE TLDS DE ALTO RIESGO (PHISHING Y MALWARE)
+  # ==========================================
+  - '||*.zip^$deny'
+  - '||*.mov^$deny'
+  - '||*.country^$deny'
+  - '||*.kim^$deny'
+  - '||*.science^$deny'
+  - '||*.gdn^$deny'
+  - '||*.click^$deny'
+  - '||*.link^$deny'
+  - '||*.work^$deny'
+  - '||*.men^$deny'
+  - '||*.stream^$deny'
+  - '||*.mom^$deny'
+
+  # ==========================================
+  # TELEMETRÍA Y ESPIONAJE DE WINDOWS 10 / 11
+  # ==========================================
+  - '||events.data.microsoft.com^'
+  - '||mobile.events.data.microsoft.com^'
+  - '||self.events.data.microsoft.com^'
+  - '||v10.events.data.microsoft.com^'
+  - '||v20.events.data.microsoft.com^'
+  - '||browser.events.data.microsoft.com^'
+  - '||watson.telemetry.microsoft.com^'
+  - '||activity.windows.com^'
+  - '||telemetry.microsoft.com^'
+  - '||diagnostics.support.microsoft.com^'
+  - '||settings-win.data.microsoft.com^'
+  - '||feedback.windows.com^'
+  - '||cortana.ai^'
+  - '||search.msn.com^'
+  - '||nexusrules.office.net^'
+  - '||telecommand.telemetry.microsoft.com^'
+  - '||telecommand.telemetry.microsoft.com.nsatc.net^'
+  - '||onesettings-db5p.metron.live.com.nsatc.net^'
+  - '||msedge.api.cdp.microsoft.com^'
+  - '||nf.smartscreen.microsoft.com^'
+  - '||smartscreen-prod.microsoft.com^'
+  - '||edge.activity.windows.com^'
+
+  # ==========================================
+  # TELEMETRÍA DE HARDWARE Y APLICACIONES
+  # ==========================================
+  - '||telemetry.nvidia.com^'
+  - '||gfe.geforce.com^'
+  - '||telemetry.gfe.nvidia.com^'
+  - '||telemetry.intel.com^'
+  - '||telemetry.hp.com^'
+  - '||hp-telemetry.com^'
+  - '||science.discord.com^'
+  - '||tracking.discord.com^'
+  - '||crashdump.spotify.com^'
+
+  # ==========================================
+  # ANTI-FINGERPRINTING & WEBRTC LEAKS
+  # ==========================================
+  - '||floc.google.com^'
+  - '||fledge.google.com^'
+  - '||topics.google.com^'
+  - '||adservice.google.com^'
+  - '||stunprotocol.org^$dnsrewrite=NXDOMAIN'
+  - '||stun.counterpath.net^$dnsrewrite=NXDOMAIN'
+  - '||stun.sipgate.net^$dnsrewrite=NXDOMAIN'
+
+  # ==========================================
+  # ANTI-CRIPTOMINADO Y BALIZAS
+  # ==========================================
+  - '||coinhive.com^'
+  - '||coin-hive.com^'
+  - '||crypto-loot.com^'
+  - '||ping.chartbeat.net^'
+  - '||beacon.krxd.net^'
+  - '||beacon.scorecardresearch.com^'
+  - '||sb.scorecardresearch.com^'
+
+  # ==========================================
+  # SMART TV & STREAMING TELEMETRÍA
+  # ==========================================
+  - '||lgtvcommon.com^'
+  - '||aic-common.lgtvcommon.com^'
+  - '||cooper.logs.roku.com^'
+  - '||device-metrics-us.amazon.com^'
+  - '||device-metrics-us-2.amazon.com^'
+
+  # ==========================================
+  # CRITICAL ALLOWLIST EXCEPTIONS
+  # ==========================================
   - '@@||github.com^$important'
   - '@@||torproject.org^$important'
   - '@@||*.torproject.org^$important'
   - '@@||accounts.google.com^$important'
+  - '@@||oauth2.googleapis.com^$important'
+  - '@@||googleapis.com^$important'
+  - '@@||gemini.google.com^$important'

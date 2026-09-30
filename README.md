@@ -155,6 +155,12 @@ adguardhome-tor-dns-fortress/
 ├── docs/
 │   ├── ARCHITECTURE.md              # Documentación técnica y modelo de amenazas
 │   └── WINDOWS_PORT_53_FIX.md       # Explicación a fondo del fix para SharedAccess
+├── tools/                           # Scripts utilitarios para migración y hardening avanzado
+│   ├── build_master_fortress.js     # Constructor de configuración unificada
+│   ├── apply_full_frontier_hardening.js # Optimizador TLS local y amnesic logs
+│   ├── apply_maximum_hardening.js   # Inyector de protección Bogus NXDOMAIN y TTL
+│   ├── apply_server_security_privacy.js # Restricciones de red privada y rate limiting
+│   └── update_adguard_settings.js   # Actualizador selectivo de reglas y bootstraps
 ├── .gitignore                       # Protección estricta de credenciales, logs y claves
 ├── LICENSE                          # Licencia MIT
 └── package.json                     # Metadatos del proyecto

@@ -1,7 +1,10 @@
 // ==============================================================================
-// Centinela AI: Real-Time DNS Threat Detection & Dynamic Firewalling
-// Project: adguardhome-tor-dns-fortress
-// Analyzes live AdGuard Home queries for C2 Beacons, High Entropy (DGA) & Phishing
+// 🛡️ AI DNS Centinela v2 — Gemini 3.5 Flash Lite + DGA + C2 Beaconing
+// ==============================================================================
+// Proactive AI sentinel that monitors AdGuard Home query logs in real-time.
+// Detects algorithmically-generated domains (DGA) via Shannon entropy and
+// periodic C2 beaconing via standard deviation heuristics.
+// Suspicious domains are confirmed by Gemini AI before blocking.
 // ==============================================================================
 
 const http = require('http');
@@ -9,14 +12,27 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT_DIR = path.resolve(__dirname, '..');
-const ENV_PATH = process.env.ENV_PATH || path.join(ROOT_DIR, 'config', '.env');
-const CACHE_PATH = path.join(ROOT_DIR, 'checked_domains.json');
-const LOG_PATH = path.join(ROOT_DIR, 'logs', 'ai_guard.log');
+// Portable paths — resolve relative to script location or use env overrides
+const BASE_DIR = process.env.FORTRESS_DIR || path.join(__dirname, '..');
+const ENV_PATH = process.env.ENV_FILE || path.join(BASE_DIR, 'config', '.env');
+const CACHE_PATH = process.env.CACHE_FILE || path.join(BASE_DIR, 'data', 'checked_domains.json');
+const LOG_PATH = process.env.AI_GUARD_LOG || path.join(BASE_DIR, 'logs', 'ai_guard.log');
 
+// AdGuard Home connection defaults
+const AGH_HOST = process.env.AGH_HOST || '127.0.0.1';
+const AGH_PORT = parseInt(process.env.AGH_PORT || '80', 10);
+
+// Scan configuration
+const SCAN_INTERVAL_MS = parseInt(process.env.SCAN_INTERVAL || '50000', 10);
+const QUERY_LIMIT = parseInt(process.env.QUERY_LIMIT || '200', 10);
+const AI_RATE_DELAY_MS = 1200; // Delay between Gemini API calls to respect rate limits
+
+// Ensure directories exist
 function ensureDir(filePath) {
   const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
 function log(msg) {
@@ -25,35 +41,51 @@ function log(msg) {
   try {
     ensureDir(LOG_PATH);
     fs.appendFileSync(LOG_PATH, line, 'utf8');
-  } catch (e) {}
+    // Rotate log if > 2MB
+    const stat = fs.statSync(LOG_PATH);
+    if (stat.size > 2 * 1024 * 1024) {
+      const oldLog = LOG_PATH + '.old';
+      if (fs.existsSync(oldLog)) fs.unlinkSync(oldLog);
+      fs.renameSync(LOG_PATH, oldLog);
+    }
+  } catch (e) { /* silent */ }
 }
 
-// Parse environment file
+// ─── Load .env ──────────────────────────────────────────────────────────────
 let env = {};
-if (fs.existsSync(ENV_PATH)) {
-  const lines = fs.readFileSync(ENV_PATH, 'utf8').split(/\r?\n/);
-  for (const l of lines) {
-    const m = l.match(/^([A-Z_]+)=(.*)$/);
-    if (m) env[m[1].trim()] = m[2].trim();
+const envPaths = [
+  ENV_PATH,
+  path.join(BASE_DIR, '.env'),
+  path.join(__dirname, '..', '.env'),
+  path.join(__dirname, '..', 'config', '.env')
+];
+for (const ep of envPaths) {
+  if (fs.existsSync(ep)) {
+    const lines = fs.readFileSync(ep, 'utf8').split(/\r?\n/);
+    for (const l of lines) {
+      const m = l.match(/^([A-Z_]+)=(.*)$/);
+      if (m) env[m[1].trim()] = m[2].trim();
+    }
+    break;
   }
 }
 
-const AGH_HOST = process.env.ADGUARD_HOST || '127.0.0.1';
-const AGH_PORT = parseInt(process.env.ADGUARD_PORT || '80', 10);
-const AGH_USER = env.ADGUARD_USERNAME || 'admin';
-const AGH_PASS = env.ADGUARD_PASSWORD || '';
-const GEMINI_KEY = env.GEMINI_API_KEY || '';
+const AGH_USER = env.ADGUARD_USERNAME || process.env.ADGUARD_USERNAME || 'admin';
+const AGH_PASS = env.ADGUARD_PASSWORD || process.env.ADGUARD_PASSWORD;
+const GEMINI_KEY = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
-if (!AGH_PASS) {
-  log('⚠️ ADGUARD_PASSWORD no configurada en config/.env. Algunas funciones de baneo automático requerirán autenticación.');
+if (!AGH_PASS || !GEMINI_KEY) {
+  log('❌ ERROR: Missing credentials. Set ADGUARD_PASSWORD and GEMINI_API_KEY in .env or environment.');
+  process.exit(1);
 }
 
-// Domain verification cache
+// ─── Domain Cache ───────────────────────────────────────────────────────────
 let checkedDomains = new Set();
 if (fs.existsSync(CACHE_PATH)) {
   try {
     const raw = fs.readFileSync(CACHE_PATH, 'utf8');
-    checkedDomains = new Set(JSON.parse(raw));
+    const arr = JSON.parse(raw);
+    checkedDomains = new Set(arr);
   } catch (e) {
     checkedDomains = new Set();
   }
@@ -62,12 +94,18 @@ if (fs.existsSync(CACHE_PATH)) {
 function saveCache() {
   try {
     ensureDir(CACHE_PATH);
-    const list = Array.from(checkedDomains).slice(-10000);
-    fs.writeFileSync(CACHE_PATH, JSON.stringify(list), 'utf8');
-  } catch (e) {}
+    const list = Array.from(checkedDomains);
+    const trimmed = list.slice(-10000); // Keep last 10k entries
+    fs.writeFileSync(CACHE_PATH, JSON.stringify(trimmed), 'utf8');
+  } catch (e) { /* silent */ }
 }
 
-// Shannon Entropy for DGA (Domain Generation Algorithms) detection
+// ─── Domain Timestamp History for C2 Beacon Detection ───────────────────────
+const domainQueryTimes = new Map();
+
+// ─── Shannon Entropy Calculation ────────────────────────────────────────────
+// H(X) = -Σ P(xi) * log2(P(xi))
+// DGA domains typically exhibit entropy > 3.8 with length > 12
 function calculateEntropy(str) {
   if (!str) return 0;
   const len = str.length;
@@ -84,6 +122,8 @@ function calculateEntropy(str) {
   return entropy;
 }
 
+// ─── Benign Domains Allowlist ───────────────────────────────────────────────
+// Common reputable domains that never need AI analysis
 const BENIGN_ROOTS = [
   'google.com', 'googleapis.com', 'gstatic.com', 'googleusercontent.com', 'youtube.com',
   'microsoft.com', 'windows.com', 'live.com', 'office.com', 'azure.com', 'github.com',
@@ -100,21 +140,24 @@ function isKnownBenign(domain) {
   return false;
 }
 
+// ─── AdGuard Home API Client ────────────────────────────────────────────────
 function aghRequest(endpoint, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
     const auth = Buffer.from(`${AGH_USER}:${AGH_PASS}`).toString('base64');
-    const headers = { 'Authorization': 'Basic ' + auth };
+    const headers = {
+      'Authorization': 'Basic ' + auth
+    };
     if (body) {
       headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(body);
     }
-
     const req = http.request({
       hostname: AGH_HOST,
       port: AGH_PORT,
       path: endpoint,
       method: method,
       headers: headers,
-      timeout: 5000
+      timeout: 10000
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -126,96 +169,198 @@ function aghRequest(endpoint, method = 'GET', body = null) {
             resolve(data);
           }
         } else {
-          reject(new Error(`AGH API ${endpoint} retornó HTTP ${res.statusCode}: ${data}`));
+          reject(new Error(`AGH API ${res.statusCode}: ${data}`));
         }
       });
     });
-
     req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('AGH API Timeout')); });
-    if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.on('timeout', () => req.destroy(new Error('AGH API timeout')));
+    if (body) req.write(body);
     req.end();
   });
 }
 
-async function blockDomain(domain, reason) {
-  log(`🚨 [CENTINELA AI] BLOQUEANDO DOMINIO: ${domain} | Motivo: ${reason}`);
+// ─── Gemini AI Threat Analysis ──────────────────────────────────────────────
+// Queries Gemini 3.5 Flash Lite to classify a domain as MALICIOUS or SAFE.
+// Falls back to SAFE on any error to avoid false positive blocking.
+function askGemini(domain, details) {
+  return new Promise((resolve) => {
+    const prompt = `You are an elite cybersecurity threat analyst. Analyze this domain queried by a computer: "${domain}".
+Details: ${details}
+Look for Domain Generation Algorithms (DGA), botnet C2 beacons, infostealer beacons, phishing, or typosquatting.
+Reply with EXACTLY one word: "MALICIOUS" or "SAFE".`;
+
+    const payload = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }]
+    });
+
+    const req = https.request({
+      hostname: 'generativelanguage.googleapis.com',
+      path: `/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_KEY}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      },
+      timeout: 15000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const answer = json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()?.toUpperCase() || 'SAFE';
+          if (answer.includes('MALICIOUS')) {
+            resolve('MALICIOUS');
+          } else {
+            resolve('SAFE');
+          }
+        } catch (e) {
+          resolve('SAFE');
+        }
+      });
+    });
+    req.on('error', () => resolve('SAFE'));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve('SAFE');
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ─── Block Domain in AdGuard Home ───────────────────────────────────────────
+async function blockDomain(domain) {
   try {
-    const rule = `||${domain}^$dnsrewrite=NXDOMAIN`;
-    const filtering = await aghRequest('/control/filtering/status');
-    const rules = filtering.user_rules || [];
-    if (!rules.includes(rule)) {
-      rules.push(rule);
-      await aghRequest('/control/filtering/set_rules', 'POST', { rules: rules });
-      log(`🛡️ Regla inyectada exitosamente en AdGuard Home: ${rule}`);
+    const status = await aghRequest('/control/filtering/status');
+    const rules = status.user_rules || [];
+    const blockRule = `||${domain}^`;
+    if (!rules.includes(blockRule)) {
+      rules.push(blockRule);
+      await aghRequest('/control/filtering/set_rules', 'POST', JSON.stringify({ rules }));
+      log(`🚨 DOMINIO MALICIOSO DETECTADO Y BLOQUEADO AUTOMÁTICAMENTE: ${domain}`);
     }
-  } catch (err) {
-    log(`❌ Error inyectando regla de bloqueo: ${err.message}`);
+  } catch (e) {
+    log(`Error al aplicar bloqueo de ${domain}: ${e.message}`);
   }
 }
 
-// C2 Periodic Beaconing Tracker
-const domainHistory = new Map();
-
-function trackBeacon(domain) {
-  const now = Date.now();
-  if (!domainHistory.has(domain)) {
-    domainHistory.set(domain, []);
+// ─── C2 Beaconing Detection Heuristic ───────────────────────────────────────
+// Detects periodic query patterns indicative of C2 beacon callbacks.
+// Requires 3+ timestamps. Flags intervals between 10s-300s with stddev < 4s.
+function detectBeaconing(times) {
+  if (times.length < 3) return null;
+  const sorted = [...times].sort((a, b) => a - b);
+  const diffs = [];
+  for (let i = 1; i < sorted.length; i++) {
+    diffs.push((sorted[i] - sorted[i - 1]) / 1000); // Convert to seconds
   }
-  const timestamps = domainHistory.get(domain);
-  timestamps.push(now);
-  if (timestamps.length > 10) timestamps.shift();
-
-  if (timestamps.length >= 5) {
-    const intervals = [];
-    for (let i = 1; i < timestamps.length; i++) {
-      intervals.push(timestamps[i] - timestamps[i - 1]);
-    }
-    const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-    const variance = intervals.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / intervals.length;
-    const stdDev = Math.sqrt(variance);
-
-    // If queries occur with near-zero jitter (standard deviation < 400ms) at tight intervals:
-    if (avg < 30000 && stdDev < 400 && !isKnownBenign(domain)) {
-      log(`⚠️ ALERTA BEACON C2: Dominio ${domain} exhibe pulsos de baliza periódica (avg: ${Math.round(avg)}ms, stdDev: ${Math.round(stdDev)}ms)`);
-      blockDomain(domain, 'C2 Periodic Beaconing Pattern');
+  const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  // If queries happen between 10s and 300s apart (typical C2 jitter range)
+  if (avg >= 10 && avg <= 300) {
+    const variance = diffs.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / diffs.length;
+    const stddev = Math.sqrt(variance);
+    // Standard deviation under 4 seconds indicates machine periodicity (low jitter)
+    if (stddev < 4.0) {
+      return { avg, stddev };
     }
   }
+  return null;
 }
 
-async function analyzeQueryLog() {
+// ─── Main Scan Loop ─────────────────────────────────────────────────────────
+async function scanRecentQueries() {
   try {
-    const logData = await aghRequest('/control/querylog?limit=50');
-    if (!logData || !logData.data) return;
+    const data = await aghRequest(`/control/querylog?limit=${QUERY_LIMIT}`);
+    const logs = data.data || [];
+    const candidates = new Set();
+    const now = Date.now();
 
-    for (const item of logData.data) {
-      const q = item.question;
-      if (!q || !q.name) continue;
-      const domain = q.name.toLowerCase().replace(/\.$/, '');
+    for (const item of logs) {
+      const qname = item.question?.name?.toLowerCase()?.trim();
+      if (!qname) continue;
+      // Skip local, arpa, root, or very short queries
+      if (
+        qname.length < 5 ||
+        !qname.includes('.') ||
+        qname.endsWith('.arpa') ||
+        qname.endsWith('.local') ||
+        qname.endsWith('.home') ||
+        qname.endsWith('.lan') ||
+        isKnownBenign(qname)
+      ) {
+        continue;
+      }
 
-      if (checkedDomains.has(domain)) continue;
+      // Record timestamps for beaconing detection (uses original log time)
+      const itemTime = item.time ? new Date(item.time).getTime() : now;
+      if (!domainQueryTimes.has(qname)) {
+        domainQueryTimes.set(qname, []);
+      }
+      const times = domainQueryTimes.get(qname);
+      times.push(itemTime);
+      // Keep only last 10 entries per domain
+      if (times.length > 10) times.shift();
+
+      // Only flag for entropy analysis if not already checked
+      if (!checkedDomains.has(qname)) {
+        candidates.add(qname);
+      }
+    }
+
+    // ── Phase 1: Analyze New Domains (Entropy / DGA) ──
+    for (const domain of candidates) {
       checkedDomains.add(domain);
-
-      if (isKnownBenign(domain)) continue;
-
-      trackBeacon(domain);
-
-      // Check DGA entropy on main label
       const parts = domain.split('.');
-      const mainLabel = parts.length > 2 ? parts[parts.length - 2] : parts[0];
-      const entropy = calculateEntropy(mainLabel);
+      const base = parts[0];
+      const entropy = calculateEntropy(base);
 
-      if (entropy > 3.8 && mainLabel.length > 12) {
-        log(`⚠️ ALTO NIVEL DE ENTROPÍA (DGA/Túnel DNS Sospechoso): ${domain} (Entropía: ${entropy.toFixed(2)})`);
-        blockDomain(domain, `High Entropy DGA (${entropy.toFixed(2)})`);
+      const isSuspicious = entropy > 3.85 || (base.length > 20 && /\d/.test(base));
+
+      if (isSuspicious) {
+        log(`🔍 Inspeccionando dominio sospechoso por entropía (${entropy.toFixed(2)}): ${domain}`);
+        const verdict = await askGemini(domain, `Entropy: ${entropy.toFixed(2)}`);
+        log(`   🤖 Veredicto IA: ${verdict} para ${domain}`);
+        if (verdict === 'MALICIOUS') {
+          await blockDomain(domain);
+        }
+        await new Promise(r => setTimeout(r, AI_RATE_DELAY_MS));
+      }
+    }
+
+    // ── Phase 2: Analyze C2 Beaconing Heuristics ──
+    // NOTE: Beaconing uses a separate namespace ("beacon:domain") so that
+    // entropy-checked domains can still accumulate timestamps for beaconing.
+    for (const [domain, times] of domainQueryTimes.entries()) {
+      if (checkedDomains.has(`beacon:${domain}`)) continue;
+      const beacon = detectBeaconing(times);
+      if (beacon) {
+        checkedDomains.add(`beacon:${domain}`);
+        log(`⚠️ ALERTA DE BEACONING PERIÓDICO DETECTADO (~${beacon.avg.toFixed(1)}s, stddev: ${beacon.stddev.toFixed(2)}s): ${domain}`);
+        const verdict = await askGemini(domain, `Periodic query interval: ~${beacon.avg.toFixed(1)}s, jitter stddev: ${beacon.stddev.toFixed(2)}s`);
+        log(`   🤖 Veredicto IA para Beaconing: ${verdict} en ${domain}`);
+        if (verdict === 'MALICIOUS') {
+          await blockDomain(domain);
+        }
+        await new Promise(r => setTimeout(r, AI_RATE_DELAY_MS));
       }
     }
 
     saveCache();
   } catch (e) {
-    // API polling error
+    log(`Aviso en escaneo: ${e.message}`);
   }
 }
 
-log('🛡️ Centinela AI para AdGuard Home inicializado y vigilando en tiempo real.');
-setInterval(analyzeQueryLog, 5000);
+// ─── Startup ────────────────────────────────────────────────────────────────
+log('🛡️ AI DNS Guard v2 (Gemini 3.5 Flash Lite + DGA + C2 Beaconing) activo.');
+log(`   📁 Base: ${BASE_DIR}`);
+log(`   🔗 AdGuard Home: http://${AGH_HOST}:${AGH_PORT}`);
+log(`   ⏱️  Intervalo de escaneo: ${SCAN_INTERVAL_MS / 1000}s`);
+
+// Initial scan
+scanRecentQueries();
+
+// Recurring loop
+setInterval(scanRecentQueries, SCAN_INTERVAL_MS);

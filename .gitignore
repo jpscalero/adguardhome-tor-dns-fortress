@@ -35,3 +35,5 @@ Desktop.ini
 .idea/
 .vscode/
 *.swp
+# Submodules & Separate Repos
+wiki/
