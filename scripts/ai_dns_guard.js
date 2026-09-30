@@ -65,8 +65,13 @@ for (const ep of envPaths) {
   if (fs.existsSync(ep)) {
     const lines = fs.readFileSync(ep, 'utf8').split(/\r?\n/);
     for (const l of lines) {
-      const m = l.match(/^([A-Z_]+)=(.*)$/);
-      if (m) env[m[1].trim()] = m[2].trim();
+      const trimmed = l.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith(';')) continue;
+      const m = trimmed.match(/^([A-Za-z0-9_]+)=(.*)$/);
+      if (m) {
+        const val = m[2].trim().replace(/^["']|["']$/g, '');
+        env[m[1].trim()] = val;
+      }
     }
     break;
   }
@@ -180,9 +185,17 @@ function isKnownBenign(domain) {
   return false;
 }
 
+// Custom HTTP agents to avoid connection pooling leaks
+const httpAgent = new http.Agent({ keepAlive: false, maxSockets: 4 });
+const httpsAgent = new https.Agent({ keepAlive: false, maxSockets: 4 });
+
 // ─── AdGuard Home API Client ────────────────────────────────────────────────
 function aghRequest(endpoint, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const safeResolve = (val) => { if (!settled) { settled = true; resolve(val); } };
+    const safeReject = (err) => { if (!settled) { settled = true; reject(err); } };
+
     const auth = Buffer.from(`${AGH_USER}:${AGH_PASS}`).toString('base64');
     const headers = {
       'Authorization': 'Basic ' + auth
@@ -197,24 +210,41 @@ function aghRequest(endpoint, method = 'GET', body = null) {
       path: endpoint,
       method: method,
       headers: headers,
+      agent: httpAgent,
       timeout: 10000
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
+      res.on('aborted', () => {
+        req.destroy();
+        safeReject(new Error('AGH API response aborted by peer'));
+      });
       res.on('end', () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
-            resolve(data ? JSON.parse(data) : {});
+            safeResolve(data ? JSON.parse(data) : {});
           } catch (e) {
-            resolve(data);
+            safeResolve(data);
           }
         } else {
-          reject(new Error(`AGH API ${res.statusCode}: ${data}`));
+          safeReject(new Error(`AGH API ${res.statusCode}: ${data}`));
         }
       });
+      res.on('error', (err) => {
+        req.destroy();
+        safeReject(err);
+      });
     });
-    req.on('error', reject);
-    req.on('timeout', () => req.destroy(new Error('AGH API timeout')));
+
+    req.on('error', (err) => {
+      req.destroy();
+      safeReject(err);
+    });
+    req.on('timeout', () => {
+      req.destroy(new Error('AGH API timeout'));
+      safeReject(new Error('AGH API timeout'));
+    });
+
     if (body) req.write(body);
     req.end();
   });
@@ -224,6 +254,9 @@ function aghRequest(endpoint, method = 'GET', body = null) {
 // Queries Gemini API with contextual awareness of legitimate cloud hosts
 function askGemini(domain, details) {
   return new Promise((resolve) => {
+    let settled = false;
+    const safeResolve = (val) => { if (!settled) { settled = true; resolve(val); } };
+
     const prompt = `You are an elite cybersecurity threat analyst. Analyze this domain queried by a computer: "${domain}".
 Details: ${details}
 Analyze for Domain Generation Algorithms (DGA), botnet C2 beacons, infostealer beacons, phishing, or typosquatting.
@@ -242,29 +275,43 @@ Reply with EXACTLY one word: "MALICIOUS" or "SAFE".`;
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(payload)
       },
+      agent: httpsAgent,
       timeout: 15000
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
+      res.on('aborted', () => {
+        req.destroy();
+        safeResolve('SAFE');
+      });
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
           const answer = json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()?.toUpperCase() || 'SAFE';
           if (answer.includes('MALICIOUS')) {
-            resolve('MALICIOUS');
+            safeResolve('MALICIOUS');
           } else {
-            resolve('SAFE');
+            safeResolve('SAFE');
           }
         } catch (e) {
-          resolve('SAFE');
+          safeResolve('SAFE');
         }
       });
+      res.on('error', () => {
+        req.destroy();
+        safeResolve('SAFE');
+      });
     });
-    req.on('error', () => resolve('SAFE'));
+
+    req.on('error', () => {
+      req.destroy();
+      safeResolve('SAFE');
+    });
     req.on('timeout', () => {
       req.destroy();
-      resolve('SAFE');
+      safeResolve('SAFE');
     });
+
     req.write(payload);
     req.end();
   });
@@ -412,4 +459,20 @@ log(`   ⏱️  Intervalo de escaneo: ${SCAN_INTERVAL_MS / 1000}s`);
 scanRecentQueries();
 
 // Recurring loop
-setInterval(scanRecentQueries, SCAN_INTERVAL_MS);
+const scanTimer = setInterval(scanRecentQueries, SCAN_INTERVAL_MS);
+
+// ─── Graceful Shutdown ──────────────────────────────────────────────────────
+function gracefulShutdown(signal) {
+  log(`🛑 Recibida señal ${signal}. Cerrando centinela de forma limpia...`);
+  try {
+    clearInterval(scanTimer);
+    saveCache();
+    httpAgent.destroy();
+    httpsAgent.destroy();
+  } catch (e) { /* silent */ }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+

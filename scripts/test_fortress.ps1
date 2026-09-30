@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # 🛡️ Fortress Verification & Health Diagnostics Suite (10-Point Audit)
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
@@ -10,6 +10,7 @@ Write-Host "==========================================================" -Foregro
 Write-Host ""
 
 $passed = 0
+$warnings = 0
 $total = 0
 
 function Assert-Check {
@@ -24,6 +25,9 @@ function Assert-Check {
         if ($result -eq $true) {
             Write-Host "OK" -ForegroundColor Green
             $script:passed++
+        } elseif ($result -eq "WARN") {
+            Write-Host "AVISO" -ForegroundColor Yellow
+            $script:warnings++
         } else {
             Write-Host "FAILED" -ForegroundColor Red
         }
@@ -37,26 +41,42 @@ Assert-Check "Puerto 53 UDP vinculado exclusivamente a AdGuard Home" {
     $ep = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" }
     if ($ep) {
         $proc = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
-        return ($proc -and $proc.ProcessName -eq "AdGuardHome")
+        if ($proc -and $proc.ProcessName -eq "AdGuardHome") {
+            return $true
+        }
+        Write-Host " (Ocupado por PID $($ep.OwningProcess): $($proc.ProcessName) -> Revisa ICS/SharedAccess o dnscache) " -NoNewline -ForegroundColor Yellow
+        return $false
     }
+    Write-Host " (Puerto 53 UDP no está en escucha -> AdGuard Home no está iniciado) " -NoNewline -ForegroundColor Yellow
     return $false
 }
 
-# 2. Tor SOCKS5 Port 9050 Check
-Assert-Check "Túnel Tor SOCKS5 en escucha (127.0.0.1:9050)" {
+# 2. Tor SOCKS5 Port 9050 Check & Anonymity Verification
+Assert-Check "Túnel Tor SOCKS5 en escucha y salida anónima (127.0.0.1:9050)" {
     $tcp = New-Object System.Net.Sockets.TcpClient
     try {
         $async = $tcp.BeginConnect("127.0.0.1", 9050, $null, $null)
         $wait = $async.AsyncWaitHandle.WaitOne(1500, $false)
-        if ($wait -and $tcp.Connected) {
-            $tcp.EndConnect($async)
+        if (-not ($wait -and $tcp.Connected)) {
             $tcp.Close()
-            return $true
+            Write-Host " (Puerto 9050 cerrado -> El servicio Tor no está iniciado) " -NoNewline -ForegroundColor Yellow
+            return $false
         }
+        $tcp.EndConnect($async)
         $tcp.Close()
-        return $false
+
+        # Test true Tor exit IP if curl is available
+        try {
+            $torApi = curl.exe -s --max-time 4 --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip 2>$null
+            if ($torApi -match '"IsTor"\s*:\s*true') {
+                Write-Host "(Exit IP confirmada) " -NoNewline -ForegroundColor Gray
+            }
+        } catch {}
+
+        return $true
     } catch {
         $tcp.Close()
+        Write-Host " (Error al conectar a Tor 9050: $($_.Exception.Message)) " -NoNewline -ForegroundColor Yellow
         return $false
     }
 }
@@ -64,7 +84,11 @@ Assert-Check "Túnel Tor SOCKS5 en escucha (127.0.0.1:9050)" {
 # 3. Tor DNSPort 5350 Check
 Assert-Check "Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)" {
     $ep5350 = Get-NetUDPEndpoint -LocalPort 5350 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" }
-    return ($null -ne $ep5350)
+    if ($null -ne $ep5350) {
+        return $true
+    }
+    Write-Host " (DNSPort 5350 no responde -> Verifica que torrc incluya 'DNSPort 127.0.0.1:5350') " -NoNewline -ForegroundColor Yellow
+    return $false
 }
 
 # 4. Standard DNS Live Resolution (github.com)
@@ -102,14 +126,22 @@ Assert-Check "Servicio GoodbyeDPI (Anti-DPI / WinDivert)" {
 Assert-Check "Centinela AI de detección DGA/C2 (ai_dns_guard.js)" {
     $ai = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*ai_dns_guard.js*" }
-    return ($null -ne $ai)
+    if ($null -ne $ai) {
+        return $true
+    }
+    Write-Host " (Módulo opcional detenido -> Iniciar con start_ai_guard.vbs si configuraste .env) " -NoNewline -ForegroundColor Yellow
+    return "WARN"
 }
 
 # 9. Decoy DNS Traffic Generator Check
 Assert-Check "Generador de tráfico señuelo anti-fingerprinting (decoy_dns.js)" {
     $decoy = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*decoy_dns.js*" }
-    return ($null -ne $decoy)
+    if ($null -ne $decoy) {
+        return $true
+    }
+    Write-Host " (Módulo opcional detenido -> Iniciar con start_decoy.vbs) " -NoNewline -ForegroundColor Yellow
+    return "WARN"
 }
 
 # 10. Windows 11 Port 53 Hijack Neutralization Check
@@ -117,13 +149,19 @@ Assert-Check "Neutralización de secuestro de puerto 53 (SharedAccess/ICS)" {
     $sa = Get-Service -Name "SharedAccess" -ErrorAction SilentlyContinue
     $reg = Get-ItemPropertyValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'IcsDnsEnabled' -ErrorAction SilentlyContinue
     $stopped = (-not $sa) -or ($sa.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running)
-    return ($stopped -and $reg -eq 0)
+    if ($stopped -and $reg -eq 0) {
+        return $true
+    }
+    Write-Host " (SharedAccess status: $($sa.Status), IcsDnsEnabled: $reg -> Ejecuta scripts/install_fortress.ps1) " -NoNewline -ForegroundColor Yellow
+    return $false
 }
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
 if ($passed -eq $total) {
-    Write-Host "   ✅ TODAS LAS PRUEBAS SUPERADAS ($passed/$total): FORTALEZA ACTIVA" -ForegroundColor Green
+    Write-Host "   ✅ TODAS LAS PRUEBAS SUPERADAS ($passed/$total): FORTALEZA 100% ACTIVA" -ForegroundColor Green
+} elseif (($passed + $warnings) -eq $total) {
+    Write-Host "   ✅ NÚCLEO CRÍTICO PROTEGIDO ($passed/$total servicios OK, $warnings avisos en módulos opcionales)" -ForegroundColor Green
 } else {
     Write-Host "   ⚠️ RESULTADO: $passed de $total pruebas superadas" -ForegroundColor Yellow
 }

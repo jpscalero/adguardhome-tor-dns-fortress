@@ -1,41 +1,91 @@
 # ==============================================================================
-# Hardened Tor Configuration for AdGuard Home DNS & Proxy Gateway
-# Default Location on Windows: C:\Program Files\Tor\torrc or DataDirectory\torrc
+# Hardened Tor Configuration for AdGuard Home DNS Fortress & Proxy Gateway
+# Default Location on Windows: %APPDATA%\tor\torrc or C:\AdGuardHome\tor\torrc
 # ==============================================================================
 
-# Core Network & Ports
+# ─── Core Network & Ports ───────────────────────────────────────────────────
+# SocksPort: SOCKS5 proxy on localhost with destination address/port isolation
+# prevents stream correlation across different DNS resolvers and applications.
 SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort
+
+# DNSPort: Local UDP DNS server provided by Tor for resolving .onion virtual IPs
+# and serving as fallback Tor resolver on port 5350.
 DNSPort 127.0.0.1:5350
 
-# Isolate traffic per client connection & credentials
+# ControlPort: Loopback control interface for watchdog automated circuit rotation (SIGNAL NEWNYM).
+# To enable authenticated rotation, generate a password hash by running:
+#   tor.exe --hash-password "YourSecurePassword"
+# and uncomment HashedControlPassword below:
+ControlPort 127.0.0.1:9051
+# HashedControlPassword 16:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+# Restrict SOCKS access strictly to local machine loopback interface.
 SocksPolicy accept 127.0.0.1
 SocksPolicy reject *
 
-# Security & Anti-Leak Hardening
+# ─── Client Mode & Anti-Leak Hardening ──────────────────────────────────────
+# ClientOnly: Do not act as a relay, bridge, or directory server under any condition.
 ClientOnly 1
+
+# SafeLogging: Scrubs all IP addresses and user data from Tor log output.
 SafeLogging 1
+
+# GeoIPExcludeUnknown: Avoid routing through relays whose country cannot be verified.
 GeoIPExcludeUnknown 1
+
+# StrictNodes: If 0, allows Tor to fallback if specific country constraints cannot be met.
 StrictNodes 0
 
-# Onion Routing & DNS
+# ExcludeNodes: Optional. Uncomment to exclude relays located in jurisdictions known for mass interception:
+# ExcludeNodes {cn},{ru},{ir},{by},{kp}
+
+# ─── Onion Routing & Virtual IP Mapping ─────────────────────────────────────
+# AutomapHostsOnResolve: Returns synthetic IPv4 addresses for .onion queries so
+# standard DNS clients and AdGuard Home can route .onion requests without errors.
 AutomapHostsOnResolve 1
 AutomapHostsSuffixes .onion,.exit
+
+# VirtualAddrNetworkIPv4: Subnet range used to map .onion synthetic addresses.
+# Must be a private range that does not collide with local LAN.
 VirtualAddrNetworkIPv4 10.192.0.0/10
 
-# Performance & Circuit Stability
+# ─── Performance & Circuit Stability ────────────────────────────────────────
+# NumEntryGuards: Maintain 3 stable entry guards to balance path diversity and guard pinning defense.
 NumEntryGuards 3
-CircuitBuildTimeout 10
-KeepalivePeriod 60
-NewCircuitPeriod 30
-MaxCircuitDirtiness 180
 
-# Traffic Analysis Resistance
+# CircuitBuildTimeout: Timeout in seconds before abandoning an unresponsive circuit attempt.
+CircuitBuildTimeout 10
+
+# KeepalivePeriod: Send keepalive probes every 60s to prevent NAT state timeouts on firewalls.
+KeepalivePeriod 60
+
+# NewCircuitPeriod: Check every 30s whether a new circuit should be spawned.
+NewCircuitPeriod 30
+
+# MaxCircuitDirtiness: Re-use circuits for a maximum of 1800s (30 minutes).
+# (Using lower values like 180s creates unnecessary relay churn and high DNS latency spikes).
+MaxCircuitDirtiness 1800
+
+# ─── Traffic Analysis Resistance ────────────────────────────────────────────
+# ConnectionPadding: Defends against traffic analysis by adding packet padding between relays.
 ConnectionPadding 1
+
+# EnforceDistinctSubnets: Ensures no two relays in the same 16-bit subnet are used in one circuit.
 EnforceDistinctSubnets 1
 
-# Minimize Disk Writes (SSD protection + forensic resistance)
+# ─── Forensic & Storage Resistance ──────────────────────────────────────────
+# AvoidDiskWrites: Keeps state in RAM to protect SSD endurance and prevent forensic artifacts on disk.
 AvoidDiskWrites 1
 
-# Prevent local DNS / IPv6 leaks
+# ─── SOCKS Protocol Safety ──────────────────────────────────────────────────
+# TestSocks: Keep at 0 to avoid unnecessary loopback port testing.
 TestSocks 0
+
+# WarnUnsafeSocks: Emit warnings if an application attempts unencrypted hostname resolution over SOCKS4.
 WarnUnsafeSocks 1
+
+# ─── Censorship Circumvention (Bridges / Pluggable Transports) ───────────────
+# If Tor direct connection is blocked by your ISP, enable bridges below:
+# UseBridges 1
+# ClientTransportPlugin obfs4 exec C:\Program Files\Tor\PluggableTransports\obfs4proxy.exe
+# Bridge obfs4 <IP>:<PORT> <FINGERPRINT> cert=<CERT> iat-mode=0
