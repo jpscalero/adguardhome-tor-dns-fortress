@@ -10,6 +10,7 @@ Write-Host "==========================================================" -Foregro
 Write-Host ""
 
 $passed = 0
+$failed = 0
 $warnings = 0
 $total = 0
 
@@ -30,55 +31,55 @@ function Assert-Check {
             $script:warnings++
         } else {
             Write-Host "FAILED" -ForegroundColor Red
+            $script:failed++
         }
     } catch {
         Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        $script:failed++
     }
 }
 
-# 1. Port 53 UDP Binding Check
-Assert-Check "Puerto 53 UDP vinculado exclusivamente a AdGuard Home" {
-    $ep = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" }
-    if ($ep) {
-        $proc = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
-        if ($proc -and $proc.ProcessName -eq "AdGuardHome") {
-            return $true
-        }
-        Write-Host " (Ocupado por PID $($ep.OwningProcess): $($proc.ProcessName) -> Revisa ICS/SharedAccess o dnscache) " -NoNewline -ForegroundColor Yellow
+# 1. Port 53 UDP/TCP Binding Check
+Assert-Check "Puerto 53 UDP/TCP vinculado exclusivamente a AdGuard Home" {
+    $udp = @(Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue)
+    $tcp = @(Get-NetTCPConnection -LocalPort 53 -State Listen -ErrorAction SilentlyContinue)
+    $listeners = @($udp + $tcp)
+    if ($listeners.Count -eq 0) {
+        Write-Host " (No hay listener local en el puerto 53) " -NoNewline -ForegroundColor Yellow
         return $false
     }
-    Write-Host " (Puerto 53 UDP no está en escucha -> AdGuard Home no está iniciado) " -NoNewline -ForegroundColor Yellow
-    return $false
+    $invalid = @()
+    foreach ($endpoint in $listeners) {
+        $proc = Get-Process -Id $endpoint.OwningProcess -ErrorAction SilentlyContinue
+        if (-not $proc -or $proc.ProcessName -ne "AdGuardHome" -or $endpoint.LocalAddress -notin @("127.0.0.1", "::1")) {
+            $invalid += "PID $($endpoint.OwningProcess) at $($endpoint.LocalAddress)"
+        }
+    }
+    if ($invalid.Count -gt 0) {
+        Write-Host " (Listener ajeno o expuesto: $($invalid -join ', ')) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    return (($udp.Count -gt 0) -and ($tcp.Count -gt 0))
 }
 
-# 2. Tor SOCKS5 Port 9050 Check & Anonymity Verification
-Assert-Check "Túnel Tor SOCKS5 en escucha y salida anónima (127.0.0.1:9050)" {
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    try {
-        $async = $tcp.BeginConnect("127.0.0.1", 9050, $null, $null)
-        $wait = $async.AsyncWaitHandle.WaitOne(1500, $false)
-        if (-not ($wait -and $tcp.Connected)) {
-            $tcp.Close()
-            Write-Host " (Puerto 9050 cerrado -> El servicio Tor no está iniciado) " -NoNewline -ForegroundColor Yellow
-            return $false
-        }
-        $tcp.EndConnect($async)
-        $tcp.Close()
-
-        # Test true Tor exit IP if curl is available
-        try {
-            $torApi = curl.exe -s --max-time 4 --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip 2>$null
-            if ($torApi -match '"IsTor"\s*:\s*true') {
-                Write-Host "(Exit IP confirmada) " -NoNewline -ForegroundColor Gray
-            }
-        } catch {}
-
-        return $true
-    } catch {
-        $tcp.Close()
-        Write-Host " (Error al conectar a Tor 9050: $($_.Exception.Message)) " -NoNewline -ForegroundColor Yellow
-        return $false
+# 2. Verify a real Tor exit response, not merely that the SOCKS port accepts TCP.
+Assert-Check "Salida Tor confirmada por check.torproject.org" {
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+        throw "No se encontró curl.exe; no se puede verificar la IP de salida Tor."
     }
+    $torApiText = & curl.exe --fail --silent --show-error --max-time 15 --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip 2>$null
+    $curlExitCode = $LASTEXITCODE
+    if ($curlExitCode -ne 0) {
+        throw "La petición Tor falló con código curl $curlExitCode."
+    }
+    $torApi = ($torApiText -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    $parsedExitIp = $null
+    $validExitIp = [System.Net.IPAddress]::TryParse([string]$torApi.IP, [ref]$parsedExitIp)
+    if ($torApi.IsTor -ne $true -or -not $validExitIp) {
+        throw "IsTor no es true o la API no devolvió una IP de salida válida."
+    }
+    Write-Host "(IsTor=true, IP $parsedExitIp) " -NoNewline -ForegroundColor Gray
+    return $true
 }
 
 # 3. Tor DNSPort 5350 Check
@@ -144,25 +145,23 @@ Assert-Check "Generador de tráfico señuelo anti-fingerprinting (decoy_dns.js)"
     return "WARN"
 }
 
-# 10. Windows 11 Port 53 Hijack Neutralization Check
-Assert-Check "Neutralización de secuestro de puerto 53 (SharedAccess/ICS)" {
-    $sa = Get-Service -Name "SharedAccess" -ErrorAction SilentlyContinue
-    $reg = Get-ItemPropertyValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -Name 'IcsDnsEnabled' -ErrorAction SilentlyContinue
-    $stopped = (-not $sa) -or ($sa.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running)
-    if ($stopped -and $reg -eq 0) {
-        return $true
-    }
-    Write-Host " (SharedAccess status: $($sa.Status), IcsDnsEnabled: $reg -> Ejecuta scripts/install_fortress.ps1) " -NoNewline -ForegroundColor Yellow
-    return $false
+# 10. Administration panel remains bound to loopback only
+Assert-Check "Panel de administración accesible solo por loopback" {
+    $listeners = @(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) { return "WARN" }
+    $exposed = @($listeners | Where-Object { $_.LocalAddress -notin @("127.0.0.1", "::1") })
+    return ($exposed.Count -eq 0)
 }
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
 if ($passed -eq $total) {
     Write-Host "   ✅ TODAS LAS PRUEBAS SUPERADAS ($passed/$total): FORTALEZA 100% ACTIVA" -ForegroundColor Green
-} elseif (($passed + $warnings) -eq $total) {
-    Write-Host "   ✅ NÚCLEO CRÍTICO PROTEGIDO ($passed/$total servicios OK, $warnings avisos en módulos opcionales)" -ForegroundColor Green
+} elseif ($failed -eq 0) {
+    Write-Host "   ✅ NÚCLEO CRÍTICO PROTEGIDO ($passed/$total servicios OK, $warnings avisos)" -ForegroundColor Green
 } else {
-    Write-Host "   ⚠️ RESULTADO: $passed de $total pruebas superadas" -ForegroundColor Yellow
+    Write-Host "   ❌ RESULTADO: $passed superadas, $failed fallidas, $warnings avisos" -ForegroundColor Red
 }
 Write-Host "==========================================================" -ForegroundColor Cyan
+if ($failed -gt 0) { exit 1 }
+exit 0

@@ -8,15 +8,16 @@
 # prevents stream correlation across different DNS resolvers and applications.
 SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort
 
-# DNSPort: Local UDP DNS server provided by Tor for resolving .onion virtual IPs
-# and serving as fallback Tor resolver on port 5350.
+# DNSPort: Local UDP DNS service. AdGuard Home uses this for DNS forwarding;
+# Tor resolves supported requests anonymously. Keep it bound to loopback.
 DNSPort 127.0.0.1:5350
 
-# ControlPort: Loopback control interface for watchdog automated circuit rotation (SIGNAL NEWNYM).
-# To enable authenticated rotation, generate a password hash by running:
+# ControlPort is disabled by default. Enable it only if circuit rotation is
+# needed, and configure authentication before exposing the port.
+# Generate a password hash by running:
 #   tor.exe --hash-password "YourSecurePassword"
-# and uncomment HashedControlPassword below:
-ControlPort 127.0.0.1:9051
+# then uncomment both lines below and set TOR_CONTROL_PASSWORD for the watchdog:
+# ControlPort 127.0.0.1:9051
 # HashedControlPassword 16:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 # Restrict SOCKS access strictly to local machine loopback interface.

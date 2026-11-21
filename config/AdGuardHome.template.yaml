@@ -16,8 +16,9 @@ http:
       - GET /dns-query/{ClientID}
       - POST /dns-query/{ClientID}
     insecure_enabled: false
-  # Set to 127.0.0.1:80 for local only, or 0.0.0.0:80 to serve LAN clients:
-  address: 0.0.0.0:80
+  # Keep the administration panel on loopback. TLS is disabled until a valid
+  # certificate is configured; never expose this HTTP listener to a LAN.
+  address: 127.0.0.1:3000
   session_ttl: 24h
 
 users:
@@ -28,7 +29,8 @@ users:
 auth_attempts: 3
 block_auth_min: 30
 
-# HTTP Proxy: Routes AdGuard Home management traffic (filter list downloads, version checks) through Tor:
+# AdGuard Home's HTTP client proxy (for example, filter-list downloads). This
+# does not proxy DNS upstream queries; those use Tor's local DNSPort below.
 http_proxy: socks5://127.0.0.1:9050
 language: es
 theme: dark
@@ -53,43 +55,21 @@ dns:
     # - __YOUR_LOCAL_IP__
   refuse_any: true
 
-  # Multi-Jurisdiction Parallel DoH Resolvers (Routed explicitly through Tor SOCKS5 per upstream):
-  # NOTE: In AdGuard Home (v0.107.20+), adding socks5:// to the upstream URI ensures that actual user
-  # DNS query traffic travels encrypted through Tor, independent of http_proxy.
+  # Tor DNSPort resolves A, AAAA, and PTR requests anonymously. Use a numeric
+  # loopback upstream so bootstrap DNS is not needed and cannot escape directly.
+  # AdGuard Home's upstream syntax does not attach a SOCKS5 proxy per resolver.
   upstream_dns:
-    # Switzerland (Neutral, strict privacy laws)
-    - '[https://dns.digitale-gesellschaft.ch/dns-query] socks5://127.0.0.1:9050'
-    # Austria (Neutral EU, GDPR compliant)
-    - '[https://doh.applied-privacy.net/query] socks5://127.0.0.1:9050'
-    # Sweden (Mullvad zero-logs DoH)
-    - '[https://base.dns.mullvad.net/dns-query] socks5://127.0.0.1:9050'
-    # Germany (DNS.SB, uncensored & zero-logs)
-    - '[https://doh.dns.sb/dns-query] socks5://127.0.0.1:9050'
-    # Global Swiss Foundation (Quad9, malicious domain filtering)
-    - '[https://dns.quad9.net/dns-query] socks5://127.0.0.1:9050'
-    # Cloudflare Security (1.1.1.2 malware blocking)
-    - '[https://security.cloudflare-dns.com/dns-query] socks5://127.0.0.1:9050'
-    # Control D (Malware & tracker blocking)
-    - '[https://freedns.controld.com/p2] socks5://127.0.0.1:9050'
-    # Native Tor .onion resolver integration
-    - '[/onion/]127.0.0.1:5350'
+    - 127.0.0.1:5350
 
   upstream_dns_file: ""
 
-  # Bootstrap DNS: Literal IPs only (prevents circular dependency resolving bootstrap hostnames over SOCKS5):
-  bootstrap_dns:
-    - 9.9.9.9
-    - 1.1.1.2
-    - 149.112.112.112
-    - 1.0.0.1
+  # No hostname-based upstreams are configured, so bootstrap DNS is unnecessary.
+  bootstrap_dns: []
 
-  fallback_dns:
-    - 9.9.9.9
-    - 1.1.1.2
-    - 149.112.112.112
+  # Fail closed if Tor's DNSPort is unavailable; never fall back to public DNS.
+  fallback_dns: []
 
-  # Parallel Race Mode: queries all neutral resolvers concurrently, accepts fastest answer
-  upstream_mode: parallel
+  upstream_mode: load_balance
   fastest_timeout: 1s
 
   allowed_clients: []
@@ -137,7 +117,9 @@ dns:
 
   # Anti-Leak & Integrity Enforcements:
   aaaa_disabled: true
-  enable_dnssec: true
+  # Tor DNSPort only supports A, AAAA, and PTR. It cannot provide full DNSSEC
+  # validation records, so do not advertise DNSSEC validation for this path.
+  enable_dnssec: false
   edns_client_subnet:
     custom_ip: ""
     enabled: false
@@ -152,14 +134,15 @@ dns:
     enabled: true
   blocked_response_ttl: 1800
 
-# Local TLS (DoH, DoT, DoQ) - Optional: generate self-signed cert or Let's Encrypt
+# Remote HTTPS/DoH/DoT/DoQ is disabled until a valid certificate is configured.
+# The management UI remains available only at http://127.0.0.1:3000.
 tls:
   enabled: false
   server_name: "adguard.home"
   force_https: false
-  port_https: 443
-  port_dns_over_tls: 853
-  port_dns_over_quic: 853
+  port_https: 0
+  port_dns_over_tls: 0
+  port_dns_over_quic: 0
   port_dnscrypt: 0
   dnscrypt_config_file: ""
   certificate_chain: ""

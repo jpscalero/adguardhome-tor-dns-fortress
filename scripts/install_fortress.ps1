@@ -2,14 +2,15 @@
 .SYNOPSIS
     1-Click Automated Setup for AdGuard Home + Tor DNS Privacy Fortress on Windows 11 / 10.
 .DESCRIPTION
-    Configures port 53 exclusivity, applies the Windows 11 SharedAccess neutralizer,
-    configures Tor SOCKS5 proxying, deploys hardened AdGuard Home YAML,
-    and installs the self-healing background watchdog.
+    Installs the AdGuard Home configuration and watchdog without stopping shared
+    Windows processes. DNS client settings are changed only after Tor and AdGuard
+    Home are listening on their required loopback ports.
 #>
 
 param(
     [string]$TargetDir = "C:\AdGuardHome",
-    [switch]$SkipTorInstall = $false,
+    [string]$TorConfigPath = "",
+    [string]$AdminPasswordHash = "",
     [switch]$Force = $false
 )
 
@@ -25,36 +26,42 @@ Write-Host "   🚀 INSTALADOR AUTOMATIZADO - DNS PRIVACY FORTRESS     " -Foregr
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Neutralize Windows 11 Port 53 Hijack (SharedAccess / ICS)
-Write-Host "[1/6] Aplicando solución nativa para el puerto 53 en Windows 11..." -ForegroundColor Yellow
-try {
-    $paramPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters'
-    if (-not (Test-Path $paramPath)) {
-        New-Item -Path $paramPath -Force | Out-Null
-    }
-    Set-ItemProperty -Path $paramPath -Name 'IcsDnsEnabled' -Value 0 -Type DWord -Force
-    Set-ItemProperty -Path $paramPath -Name 'EnableDNS' -Value 0 -Type DWord -Force
-    Set-ItemProperty -Path $paramPath -Name 'EnableDNSMcast' -Value 0 -Type DWord -Force
-    Set-ItemProperty -Path $paramPath -Name 'DnsDoneNotification' -Value 1 -Type DWord -Force
-    
-    # Neutralize RPC triggers, failure recovery and disable service start
-    & sc.exe triggerinfo SharedAccess delete 2>&1 | Out-Null
-    & sc.exe failure SharedAccess reset= 0 actions= "" 2>&1 | Out-Null
-    & sc.exe config SharedAccess start= disabled 2>&1 | Out-Null
-    Stop-Service SharedAccess -Force -ErrorAction SilentlyContinue
-
-    # Stop any running SharedAccess svchost instances holding port 53
-    $endpoints = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue
-    foreach ($ep in $endpoints) {
-        $p = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
-        if ($p -and $p.ProcessName -eq "svchost") {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+function Test-TcpPortOpen {
+    param([string]$Address, [int]$Port, [int]$TimeoutMs = 1500)
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect($Address, $Port, $null, $null)
+        if (-not ($async.AsyncWaitHandle.WaitOne($TimeoutMs, $false) -and $client.Connected)) {
+            return $false
         }
+        $client.EndConnect($async)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
     }
-    Write-Host "  -> Puerto 53 liberado y desencadenadores neutralizados con éxito." -ForegroundColor Green
-} catch {
-    Write-Warning "  -> Error aplicando configuración de SharedAccess: $($_.Exception.Message)"
 }
+
+# 1. Inspect port 53 without changing SharedAccess or terminating any process.
+Write-Host "[1/6] Comprobando conflictos del puerto 53 sin detener servicios..." -ForegroundColor Yellow
+$port53Endpoints = @(
+    Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue
+    Get-NetTCPConnection -LocalPort 53 -State Listen -ErrorAction SilentlyContinue
+)
+$port53Conflicts = @()
+foreach ($endpoint in $port53Endpoints) {
+    $process = Get-Process -Id $endpoint.OwningProcess -ErrorAction SilentlyContinue
+    if ($process -and $process.ProcessName -ne "AdGuardHome") {
+        $port53Conflicts += "PID $($process.Id) ($($process.ProcessName)) at $($endpoint.LocalAddress)"
+    }
+}
+if ($port53Conflicts.Count -gt 0) {
+    $details = $port53Conflicts -join "; "
+    Write-Error "El puerto 53 está ocupado por otro proceso: $details. No se ha detenido ningún servicio."
+    exit 1
+}
+Write-Host "  -> No se detectaron propietarios ajenos a AdGuard Home." -ForegroundColor Green
 
 # 2. Directory & Configuration Setup
 Write-Host "[2/6] Configurando estructura de directorios en $TargetDir..." -ForegroundColor Yellow
@@ -65,30 +72,81 @@ if (-not (Test-Path $TargetDir)) {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $templateConfig = Join-Path $repoRoot "config\AdGuardHome.template.yaml"
 $targetConfig = Join-Path $TargetDir "AdGuardHome.yaml"
+$configChanged = $false
+$torConfigChanged = $false
 
-if (-not (Test-Path $targetConfig) -or $Force) {
-    if (Test-Path $templateConfig) {
-        Copy-Item -Path $templateConfig -Destination $targetConfig -Force
-        Write-Host "  -> Plantilla de configuración copiada a $targetConfig" -ForegroundColor Green
+if (-not (Test-Path $templateConfig -PathType Leaf)) {
+    Write-Error "No se encontró la plantilla de configuración: $templateConfig"
+    exit 1
+}
+
+$targetConfigExists = Test-Path $targetConfig -PathType Leaf
+$applyTemplate = (-not $targetConfigExists) -or $Force
+$configSource = if ($applyTemplate) {
+    [System.IO.File]::ReadAllText($templateConfig)
+} else {
+    [System.IO.File]::ReadAllText($targetConfig)
+}
+$adminHashPlaceholder = "__ADMIN_BCRYPT_PASSWORD_HASH__"
+$writeConfig = $applyTemplate
+if ($configSource.Contains($adminHashPlaceholder)) {
+    if ([string]::IsNullOrWhiteSpace($AdminPasswordHash)) {
+        $AdminPasswordHash = Read-Host "Pega el hash bcrypt de admin generado con htpasswd -B -n -b (no introduzcas la contraseña en texto claro)"
     }
+    if ($AdminPasswordHash -notmatch '^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$') {
+        Write-Error "Se requiere un hash bcrypt válido para el panel. Consulta la sección Reset Web Password de la documentación oficial de AdGuard Home."
+        exit 1
+    }
+    $configSource = $configSource.Replace($adminHashPlaceholder, $AdminPasswordHash)
+    $writeConfig = $true
+}
+
+if ($configSource.Contains($adminHashPlaceholder)) {
+    Write-Error "La configuración todavía contiene el marcador de contraseña. No se instalará un panel sin autenticación funcional."
+    exit 1
+}
+
+if ($writeConfig) {
+    if ($targetConfigExists) {
+        $backupPath = "$targetConfig.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
+        Copy-Item -LiteralPath $targetConfig -Destination $backupPath
+        Write-Host "  -> Respaldo de configuración existente: $backupPath" -ForegroundColor Cyan
+    }
+    [System.IO.File]::WriteAllText($targetConfig, $configSource, [System.Text.UTF8Encoding]::new($false))
+    $configChanged = $true
+    Write-Host "  -> Configuración escrita en $targetConfig con hash de administrador válido." -ForegroundColor Green
 } else {
     Write-Host "  -> Archivo de configuración existente detectado en $targetConfig. Manteniendo configuración existente." -ForegroundColor Cyan
 }
 
-# 2.5. Tor Configuration Deployment
-Write-Host "[2.5/6] Verificando y desplegando configuración de Tor..." -ForegroundColor Yellow
-$torPaths = @("C:\Tor\torrc", "C:\Program Files\Tor\torrc")
+# 2.5. Optional Tor configuration deployment to an explicit path.
+Write-Host "[2.5/6] Configuración Tor..." -ForegroundColor Yellow
 $torTemplate = Join-Path $repoRoot "config\torrc.template"
-if (Test-Path $torTemplate) {
-    foreach ($tp in $torPaths) {
-        $tDir = Split-Path $tp
-        if (Test-Path $tDir) {
-            if ((-not (Test-Path $tp)) -or $Force) {
-                Copy-Item -Path $torTemplate -Destination $tp -Force
-                Write-Host "  -> Configuración de Tor desplegada en $tp" -ForegroundColor Green
-            }
-        }
+if ($TorConfigPath) {
+    $resolvedTorConfig = [System.IO.Path]::GetFullPath($TorConfigPath)
+    if (-not (Test-Path (Split-Path -Parent $resolvedTorConfig))) {
+        Write-Error "No existe el directorio de configuración de Tor: $(Split-Path -Parent $resolvedTorConfig)"
+        exit 1
     }
+    if ((Test-Path $resolvedTorConfig) -and -not $Force) {
+        Write-Host "  -> Se conserva el torrc existente; usa -Force para guardar un respaldo y reemplazarlo." -ForegroundColor Cyan
+    } else {
+        if (Test-Path $resolvedTorConfig) {
+            $torBackup = "$resolvedTorConfig.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
+            Copy-Item -Path $resolvedTorConfig -Destination $torBackup
+            Write-Host "  -> Respaldo de torrc existente: $torBackup" -ForegroundColor Cyan
+        }
+        Copy-Item -Path $torTemplate -Destination $resolvedTorConfig -Force
+        $torConfigChanged = $true
+        Write-Host "  -> Plantilla de Tor copiada a $resolvedTorConfig. Reinicia Tor antes de continuar." -ForegroundColor Green
+    }
+} else {
+    Write-Host "  -> No se modifica ningún torrc. Usa -TorConfigPath con la ruta exacta del servicio Tor." -ForegroundColor Yellow
+}
+
+if ($torConfigChanged) {
+    Write-Warning "Reinicia el servicio Tor y vuelve a ejecutar el instalador. No se han cambiado los adaptadores DNS de Windows."
+    exit 1
 }
 
 # 3. Copy scripts, launchers and diagnostic suite to AdGuardHome directory
@@ -121,7 +179,53 @@ if (Test-Path $launchersDir) {
     }
 }
 
-# 4. Set Windows DNS Client to 127.0.0.1
+# 4. Verify Tor and AdGuard before changing Windows DNS.
+Write-Host "[4/6] Verificando AdGuard Home y Tor antes de cambiar DNS de Windows..." -ForegroundColor Yellow
+$torDnsListener = Get-NetUDPEndpoint -LocalPort 5350 -ErrorAction SilentlyContinue |
+    Where-Object { $_.LocalAddress -eq "127.0.0.1" }
+if (-not (Test-TcpPortOpen -Address "127.0.0.1" -Port 9050) -or -not $torDnsListener) {
+    Write-Error "Tor no está listo: se requieren SOCKS 127.0.0.1:9050 y DNSPort UDP 127.0.0.1:5350. No se cambiarán los adaptadores de red."
+    exit 1
+}
+
+$aghExe = Join-Path $TargetDir "AdGuardHome.exe"
+if (-not (Test-Path $aghExe)) {
+    Write-Error "No se encontró $aghExe. No se cambiarán los adaptadores de red."
+    exit 1
+}
+$aghService = Get-Service -Name "AdGuardHome" -ErrorAction SilentlyContinue
+if (-not $aghService) {
+    & $aghExe -s install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "AdGuard Home no pudo instalar su servicio (código $LASTEXITCODE). No se cambiarán los adaptadores de red."
+        exit 1
+    }
+}
+$aghService = Get-Service -Name "AdGuardHome" -ErrorAction SilentlyContinue
+if (-not $aghService) {
+    Write-Error "No se encontró el servicio AdGuardHome después de instalarlo. No se cambiarán los adaptadores de red."
+    exit 1
+}
+if ($aghService.Status -eq "Running" -and $configChanged) {
+    Restart-Service -Name "AdGuardHome" -Force
+} elseif ($aghService.Status -ne "Running") {
+    Start-Service -Name "AdGuardHome"
+}
+Start-Sleep -Seconds 2
+$aghDnsListeners = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue |
+    Where-Object { $_.LocalAddress -in @("127.0.0.1", "::1") }
+$aghDnsReady = $false
+foreach ($endpoint in $aghDnsListeners) {
+    $process = Get-Process -Id $endpoint.OwningProcess -ErrorAction SilentlyContinue
+    if ($process -and $process.ProcessName -eq "AdGuardHome") { $aghDnsReady = $true }
+}
+if (-not $aghDnsReady) {
+    Write-Error "AdGuard Home no escucha en 127.0.0.1:53 o ::1:53. No se cambiarán los adaptadores de red."
+    exit 1
+}
+
+# Configure Windows DNS only after both local services pass the preflight.
+Write-Host "  -> Tor y AdGuard Home están disponibles." -ForegroundColor Green
 Write-Host "[4/6] Configurando adaptadores de red de Windows hacia 127.0.0.1..." -ForegroundColor Yellow
 $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' }
 foreach ($adapter in $adapters) {
@@ -161,6 +265,10 @@ Write-Host "[6/6] Ejecutando comprobación de salud del sistema..." -ForegroundC
 $diagScript = Join-Path $repoRoot "scripts\test_fortress.ps1"
 if (Test-Path $diagScript) {
     & $diagScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "La suite de verificación detectó fallos. Revisa la salida anterior."
+        exit 1
+    }
 }
 
 Write-Host ""

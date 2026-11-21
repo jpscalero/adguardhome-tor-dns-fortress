@@ -7,7 +7,7 @@
 # 3. AdGuard Home Service ('AdGuardHome') & Port 53 DNS live resolution
 # 4. AI DNS Centinela ('ai_dns_guard.js' Node process)
 # 5. Decoy DNS Traffic ('decoy_dns.js' Node process)
-# 6. Safe Port 53 Conflict Arbitration (whitelists legitimate system services)
+# 6. Passive Port 53 Conflict Reporting (never stops unrelated services)
 # 7. Dynamic Wi-Fi / Ethernet IP binding synchronization
 # 8. End-to-end DNS -> SOCKS5 -> Upstream pipeline audit
 # 9. Heartbeat monitoring and unhandled exception safety
@@ -207,77 +207,22 @@ while ($true) {
         }
 
         # --------------------------------------------------------------------------
-        # 2.2. DYNAMIC NETWORK INTERFACE SYNCHRONIZATION
+        # 2.2. LOOPBACK-ONLY DNS BINDING
         # --------------------------------------------------------------------------
-        # Ensures AdGuard Home bind_hosts always matches the machine's current Wi-Fi/Ethernet IP
-        # Prevents daemon failure on DHCP lease renewal or network switching
-        try {
-            $activeIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
-                $_.InterfaceAlias -in @("Wi-Fi", "Ethernet") -and
-                $_.IPAddress -notlike "169.254*" -and
-                $_.IPAddress -ne "127.0.0.1"
-            }).IPAddress | Select-Object -First 1
-
-            $cfgPath = Join-Path $AdGuardDir "AdGuardHome.yaml"
-            if ($activeIp -and (Test-Path $cfgPath)) {
-                $cfg = Get-Content $cfgPath -Raw
-                if ($cfg -match "bind_hosts:\s*\r?\n\s*-\s*127\.0\.0\.1\s*\r?\n\s*-\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*\r?\n\s*-\s*::1") {
-                    $boundIp = $Matches[1]
-                    if ($boundIp -ne $activeIp) {
-                        Write-WatchdogLog "WARN" "Cambio de IP de red detectado ($boundIp -> $activeIp). Actualizando bind_hosts..."
-                        $cfg = $cfg.Replace($boundIp, $activeIp)
-                        Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8 -Force
-                        Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
-                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] AdGuard Home reconfigurado y reiniciado con la nueva IP activa ($activeIp)."
-                    }
-                }
-            }
-        } catch {
-            Write-WatchdogLog "ERROR" "Error en sincronizacion dinamica de interfaz: $($_.Exception.Message)"
-        }
+        # DNS remains bound to loopback. The watchdog must not add a LAN address.
 
         # --------------------------------------------------------------------------
-        # 2.5. SAFE PORT 53 CONFLICT ARBITRATION (Whitelist Guarded)
+        # 2.5. PASSIVE PORT 53 CONFLICT REPORTING
         # --------------------------------------------------------------------------
         try {
-            $allowedProcNames = @("AdGuardHome", "dnscache", "dnsched", "wslhost", "wslrelay")
-            $udp53 = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue
-            foreach ($ep in $udp53) {
-                $proc = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
-                if ($proc -and ($proc.Name -notin $allowedProcNames)) {
-                    $procPath = $proc.Path
-                    Write-WatchdogLog "WARN" "Puerto 53 UDP ocupado por proceso no autorizado: $($proc.Name) (PID: $($proc.Id), Ruta: $procPath)."
-
-                    # Disable ICS DNS in registry
-                    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters"
-                    Set-ItemProperty -Path $regPath -Name "IcsDnsEnabled" -Value 0 -Type DWord -ErrorAction SilentlyContinue
-
-                    # Check if process is SharedAccess svchost
-                    $saSvc = Get-Service -Name "SharedAccess" -ErrorAction SilentlyContinue
-                    $isSharedAccess = ($saSvc -and $saSvc.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running)
-
-                    # Try graceful stop of SharedAccess
-                    Stop-Service SharedAccess -Force -ErrorAction SilentlyContinue
-                    Start-Sleep -Seconds 2
-
-                    # Verify if still holding port
-                    $stillHolding = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue |
-                        Where-Object { $_.OwningProcess -eq $ep.OwningProcess }
-
-                    if ($stillHolding) {
-                        # Only terminate if confirmed to be associated with SharedAccess / ipnathlp
-                        if ($isSharedAccess -or ($proc.Name -eq "svchost") -or ($procPath -like "*ipnathlp*")) {
-                            Stop-Process -Id $ep.OwningProcess -Force -ErrorAction SilentlyContinue
-                            Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Secuestrador ICS terminado forzosamente (PID: $($ep.OwningProcess))."
-                        } else {
-                            Write-WatchdogLog "WARN" "El proceso $($proc.Name) (PID: $($proc.Id)) retiene el puerto 53 pero no coincide con ICS conocido. Omitiendo terminacion forzada para proteger el sistema."
-                            continue
-                        }
-                    }
-
-                    # Restart AdGuard Home to reclaim port
-                    Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
-                    Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Puerto 53 recuperado para AdGuard Home."
+            $listeners = @(
+                Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue
+                Get-NetTCPConnection -LocalPort 53 -State Listen -ErrorAction SilentlyContinue
+            )
+            foreach ($endpoint in $listeners) {
+                $proc = Get-Process -Id $endpoint.OwningProcess -ErrorAction SilentlyContinue
+                if (-not $proc -or $proc.ProcessName -ne "AdGuardHome" -or $endpoint.LocalAddress -notin @("127.0.0.1", "::1")) {
+                    Write-WatchdogLog "WARN" "Puerto 53 tiene un listener ajeno o no limitado a loopback (PID: $($endpoint.OwningProcess), IP: $($endpoint.LocalAddress)). No se detendrá ningún servicio ni proceso."
                 }
             }
         } catch {
@@ -365,7 +310,7 @@ while ($true) {
                 $e2eDns = Resolve-DnsName -Name "duckduckgo.com" -Server "127.0.0.1" -QuickTimeout -ErrorAction SilentlyContinue
                 $e2eSw.Stop()
                 if ($e2eDns) {
-                    Write-WatchdogLog "INFO" "[PIPELINE HEALTHY] End-to-end DNS -> SOCKS5(Tor) -> Resolver verificado en $($e2eSw.ElapsedMilliseconds)ms."
+                    Write-WatchdogLog "INFO" "[DNS HEALTHY] AdGuard Home respondió una consulta local en $($e2eSw.ElapsedMilliseconds)ms; esto no verifica por sí solo la salida Tor."
                 } else {
                     Write-WatchdogLog "WARN" "[PIPELINE SLOW/FAIL] Consulta end-to-end fallo o demoro demasiado."
                 }
