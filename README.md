@@ -2,13 +2,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows 11 / 10](https://img.shields.io/badge/Platform-Windows%2011%20%2F%2010-0078D6.svg)]()
-[![DNS: DoH + Tor + DNSSEC](https://img.shields.io/badge/DNS-DoH%20%2B%20Tor%20%2B%20DNSSEC-brightgreen.svg)]()
+[![DNS: Tor DNSPort](https://img.shields.io/badge/DNS-Tor%20DNSPort-brightgreen.svg)]()
 [![Evasion: GoodbyeDPI](https://img.shields.io/badge/Evasion-GoodbyeDPI-orange.svg)]()
 [![Defense: AI Sentinel](https://img.shields.io/badge/Defense-AI%20Sentinel%20%2B%20Decoy-purple.svg)]()
 [![CI / Security Audit](https://github.com/jpscalero/adguardhome-tor-dns-fortress/actions/workflows/main.yml/badge.svg)](https://github.com/jpscalero/adguardhome-tor-dns-fortress/actions/workflows/main.yml)
 
 > **Arquitectura de Máxima Privacidad y Evasión Anti-Censura para Windows 11 / 10:**  
-> Servidor DNS local **AdGuard Home** ultra-blindado, canalizado al 100% a través de **Tor SOCKS5**, con evasión **GoodbyeDPI**, centinela **IA en tiempo real**, **generador de tráfico señuelo** y **watchdog autorreparable**.
+> Servidor DNS local **AdGuard Home** que envía consultas DNS convencionales A/AAAA/PTR a Tor mediante su DNSPort local, sin fallback DNS directo. El bloqueo de TCP/UDP 53 no intercepta DoH/DoT por HTTPS/TLS ni consultas por IP directa; esas aplicaciones requieren una política propia. Incluye panel local, proxy SOCKS5 para el cliente HTTP de AdGuard Home, GoodbyeDPI opcional, centinela y watchdog.
 
 ---
 
@@ -29,7 +29,7 @@ flowchart TD
 
         subgraph LocalDefense ["🧠 Módulos de Defensa Local"]
             Centinela["🤖 Centinela AI (ai_dns_guard.js)<br/>• Análisis de Entropía DGA<br/>• Detección de Beacons C2"]
-            Watchdog["🐕 Self-Healing Watchdog (watchdog.ps1)<br/>• Supervisión de Servicios<br/>• Arbitraje Puerto 53"]
+            Watchdog["🐕 Watchdog (watchdog.ps1)<br/>• Supervisión de servicios<br/>• Informa conflictos del puerto 53"]
             Cache["⚡ RAM Optimistic Cache (32MB / 100k+ dominios)"]
         end
 
@@ -49,15 +49,14 @@ flowchart TD
         OnionDNS["🧅 Tor DNS Resolver (127.0.0.1:5350)"]
     end
 
-    subgraph Internet ["🌍 Red Neutral Externa (DNS-over-HTTPS)"]
-        Resolvers["🔒 Resolutores DoH en Jurisdicciones Neutrales<br/>• Digitale Gesellschaft (Suiza 🇨🇭)<br/>• Applied Privacy (Austria 🇦🇹)<br/>• Mullvad Zero-Logs (Suecia 🇸🇪)<br/>• DNS.SB (Alemania 🇩🇪)<br/>• Quad9 Foundation (Suiza 🇨🇭)"]
+    subgraph Internet ["🌍 Resolución solicitada por Tor"]
+        Resolvers["Resolución DNS del nodo de salida Tor"]
         OnionNet["🧅 Red Tor (.onion Hidden Services)"]
     end
 
-    AGH -->|Cifrado SOCKS5 / DNS| TorProxy
-    AGH -->|Consultas .onion| OnionDNS
-    TorProxy --> GDPI
-    GDPI -->|Túnel 3 Saltos Cifrados| Resolvers
+    AGH -->|DNS UDP por loopback| OnionDNS
+    AGH -.->|Cliente HTTP de AdGuard, no upstream DNS| TorProxy
+    OnionDNS -->|Solicitud anónima de DNS| Resolvers
     OnionDNS --> OnionNet
 ```
 
@@ -67,11 +66,11 @@ flowchart TD
 
 | Módulo | Función y Beneficio |
 | :--- | :--- |
-| **🧅 Túnel Tor SOCKS5 Integral** | Todas las peticiones DoH viajan a través de 3 saltos cifrados por la red Tor. Tu ISP jamás ve a qué servidores DNS consultas ni los dominios que visitas. |
-| **🌍 Resolutores DoH Multijurisdicción** | Consultas paralelas de carrera (`parallel mode`) a Suiza (Digitale Gesellschaft, Quad9), Austria (Applied Privacy), Suecia (Mullvad) y Alemania (DNS.SB). |
+| **🧅 Resolución DNS por Tor** | AdGuard Home envía A/AAAA/PTR a `127.0.0.1:5350` (Tor DNSPort). Si Tor falla, no se consulta un DNS público. Tor DNSPort no admite todos los tipos de consulta ni aporta validación DNSSEC. |
+| **🔒 Panel de administración local** | Escucha solo en `127.0.0.1:3000`. TLS y los protocolos DNS remotos quedan desactivados hasta configurar un certificado válido. |
 | **⚡ Caché Optimista de Alta Velocidad** | 32 MB de RAM para más de 100.000 dominios. Respuestas instantáneas en 0 ms para dominios recurrentes, refrescando en segundo plano sin latencia de usuario. |
 | **🛡️ Evasión de DPI (GoodbyeDPI)** | Segmentación a nivel de kernel de paquetes TCP y ofuscación de SNI para eludir firewalls gubernamentales, inspección profunda del ISP y censura. |
-| **🛠️ Solución Nativa Puerto 53 Windows 11** | Incluye el script de arbitraje que neutraliza el secuestro de `0.0.0.0:53 UDP` por el servicio `SharedAccess` (ICS / Hyper-V Default Switch). |
+| **🛠️ Conflictos del puerto 53** | El instalador informa qué proceso ocupa el puerto y se detiene sin terminar procesos ni desactivar servicios compartidos de Windows. |
 | **🤖 Centinela AI en Tiempo Real** | Script Node.js que analiza el query log en vivo, calcula entropía de Shannon (detección de malware DGA) y vigila balizas C2 periódicas. |
 | **🎲 Generador de Tráfico Señuelo (Decoy)** | Inyecta ruido estadístico y consultas aleatorias con jitter a sitios neutrales y académicos para romper el perfilado de hábitos de navegación. |
 | **🐕 Watchdog Autorreparable** | Servicio supervisor en segundo plano que vigila el estado de Tor, AdGuard Home y GoodbyeDPI, reiniciándolos automáticamente ante fallos. |
@@ -82,10 +81,11 @@ flowchart TD
 
 ### Prerrequisitos
 1. **Windows 11 o 10 (64-bit)** con PowerShell 5.1 o PowerShell 7+.
-2. [AdGuard Home](https://github.com/AdguardTeam/AdguardHome/releases) instalado o descomprimido en `C:\AdGuardHome`.
-3. [Tor Expert Bundle](https://www.torproject.org/download/tor/) instalado como servicio (`tor.exe --service install`).
-4. [GoodbyeDPI](https://github.com/ValdikSS/GoodbyeDPI) instalado como servicio (`service_install_russia_blacklist.cmd` o similar).
-5. [Node.js](https://nodejs.org/) (opcional pero recomendado para el Centinela AI y el Tráfico Señuelo).
+2. [AdGuard Home](https://github.com/AdguardTeam/AdguardHome/releases) instalado en la carpeta indicada por `-TargetDir` (por defecto `C:\AdGuardHome`) y ejecutándose como servicio `AdGuardHome`.
+3. Un hash bcrypt para el usuario administrador del panel. Usa `htpasswd -B -n admin` para generarlo con entrada interactiva y copia solo la parte del hash. El instalador lo solicita o acepta `-AdminPasswordHash`. Consulta [la guía oficial de AdGuard Home](https://github.com/AdguardTeam/AdGuardHome/wiki/Configuration#reset-web-password).
+4. [Tor Expert Bundle](https://www.torproject.org/download/tor/) instalado y ejecutándose con SOCKS en `127.0.0.1:9050` y DNSPort UDP en `127.0.0.1:5350`. La plantilla `config/torrc.template` debe haberse cargado y Tor reiniciado.
+5. [GoodbyeDPI](https://github.com/ValdikSS/GoodbyeDPI) instalado como servicio (`service_install_russia_blacklist.cmd` o similar).
+6. [Node.js](https://nodejs.org/) (opcional pero recomendado para el Centinela AI y el Tráfico Señuelo).
 
 ### Instalación Automatizada
 Abre una consola de PowerShell como **Administrador** y ejecuta:
@@ -99,11 +99,19 @@ cd adguardhome-tor-dns-fortress
 powershell.exe -ExecutionPolicy Bypass -File scripts\install_fortress.ps1
 ```
 
+La plantilla contiene un marcador de hash, nunca una contraseña ficticia utilizable. El instalador pide un hash bcrypt válido antes de escribirla y guarda respaldo si reemplaza una configuración existente.
+
+Si quieres que el instalador copie la plantilla de Tor, indica la ruta exacta del `torrc` usado por el servicio. El instalador crea una copia de respaldo antes de reemplazarlo con `-Force`; después hay que reiniciar Tor y ejecutar el instalador otra vez:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts\install_fortress.ps1 -TorConfigPath "C:\ruta\del\servicio\torrc"
+```
+
 El instalador:
-* Neutraliza el secuestro del puerto 53 en Windows 11.
-* Asigna AdGuard Home exclusivamente a `127.0.0.1:53` y `::1:53`.
-* Copia la plantilla de configuración blindada `AdGuardHome.template.yaml`.
-* Configura los adaptadores de red de Windows hacia `127.0.0.1`.
+* Comprueba que Tor, AdGuard Home y los puertos requeridos están disponibles; informa conflictos del puerto 53 y nunca termina procesos ajenos.
+* Copia la plantilla de configuración solo si no existe (o con `-Force`, tras guardar una copia de respaldo).
+* Mantiene el panel de administración en `127.0.0.1:3000` y el DNS local en loopback.
+* Configura los adaptadores de red de Windows hacia `127.0.0.1` solo después de verificar la resolución local.
 * Registra la tarea programada del Watchdog autorreparable.
 * Ejecuta la suite de verificación de diagnóstico.
 
@@ -111,11 +119,13 @@ El instalador:
 
 ## 🧪 Comprobación y Diagnóstico
 
-Para verificar en cualquier momento que la fortaleza está funcionando al 100%:
+Ejecuta primero las comprobaciones estáticas y después las comprobaciones en vivo:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File scripts\test_fortress.ps1
+npm test
 ```
+
+La comprobación en vivo consulta `check.torproject.org` a través del SOCKS local y solo pasa si la respuesta tiene `IsTor=true` y una IP válida. Para ejecutar únicamente las comprobaciones que no requieren servicios activos, usa `npm run test:static`.
 
 Salida esperada:
 ```text
@@ -123,16 +133,15 @@ Salida esperada:
    🛡️ FORTRESS HEALTH & SECURITY DIAGNOSTIC SUITE        
 ==========================================================
 
-[1] Puerto 53 UDP vinculado exclusivamente a AdGuard Home... OK
-[2] Túnel Tor SOCKS5 en escucha (127.0.0.1:9050)... OK
+[1] Puerto 53 UDP/TCP vinculado exclusivamente a AdGuard Home... OK
+[2] Salida Tor verificada por check.torproject.org... OK (IsTor=true, IP válida)
 [3] Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)... OK
 [4] Resolución DNS local en 127.0.0.1:53 (github.com)... (159ms) OK
-[5] Resolución nativa de dominios Tor .onion (Virtual IP 10.x.x.x)... OK
+[5] Resolución DNS local a través de la configuración Tor... OK
 [6] Bloqueo activo de telemetría y dominios de riesgo (NXDOMAIN)... OK
 [7] Servicio GoodbyeDPI (Anti-DPI / WinDivert)... OK
 [8] Centinela AI de detección DGA/C2 (ai_dns_guard.js)... OK
 [9] Generador de tráfico señuelo anti-fingerprinting (decoy_dns.js)... OK
-[10] Neutralización de secuestro de puerto 53 (SharedAccess/ICS)... OK
 
 ==========================================================
    ✅ TODAS LAS PRUEBAS SUPERADAS (10/10): FORTALEZA ACTIVA
