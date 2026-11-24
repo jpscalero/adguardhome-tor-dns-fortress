@@ -1,9 +1,21 @@
+log:
+  file: ""
+  max_age: 3
+  max_backups: 0
+  max_size: 100
+  compress: false
+  enabled: true
+  local_time: false
+  verbose: false
+
 # ==============================================================================
 # 🛡️ Ultra-Hardened AdGuard Home Master Configuration Template
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # License: MIT
 # ==============================================================================
+
+schema_version: 35
 
 http:
   pprof:
@@ -16,8 +28,11 @@ http:
       - GET /dns-query/{ClientID}
       - POST /dns-query/{ClientID}
     insecure_enabled: false
-  # Set to 127.0.0.1:80 for local only, or 0.0.0.0:80 to serve LAN clients:
-  address: 0.0.0.0:80
+  # Fase 3: escucha solo en loopback. El panel tiene la contrasena del DNS de
+  # toda la red; exponerlo en 0.0.0.0 lo publica a cualquiera de la LAN.
+  # Si necesitas administrarlo desde otro equipo, usa un tunel SSH o un proxy
+  # con TLS, no 0.0.0.0.
+  address: 127.0.0.1:3000
   session_ttl: 24h
 
 users:
@@ -53,26 +68,39 @@ dns:
     # - __YOUR_LOCAL_IP__
   refuse_any: true
 
-  # Multi-Jurisdiction Parallel DoH Resolvers (Routed explicitly through Tor SOCKS5 per upstream):
-  # NOTE: In AdGuard Home (v0.107.20+), adding socks5:// to the upstream URI ensures that actual user
-  # DNS query traffic travels encrypted through Tor, independent of http_proxy.
+  # Resolutores DoH por IP fija, en paralelo.
+  #
+  # Por que por IP y no por nombre:
+  #   - Con proxy, AdGuard Home resuelve el hostname del upstream con
+  #     bootstrap_dns, que es DNS en claro: una fuga pequena pero real.
+  #   - Con la IP en la URL no hay resolucion previa (los certificados de
+  #     Quad9, Cloudflare y AdGuard DNS incluyen la IP como SAN).
+  #
+  # Por que el tunel va en http_proxy y no en el upstream:
+  #   AdGuard Home NO admite la sintaxis "[https://host] socks5://..."; los
+  #   corchetes son solo para upstreams por dominio ("[/ejemplo.local/]ipo").
+  #   El trafico HTTP del cliente DoH si respeta http_proxy, y eso es lo que
+  #   hace que el resolutor vea una salida de Tor y no tu IP real.
+  #
+  # Verificado en produccion con: --check-config, DNSSEC y salida Tor.
   upstream_dns:
-    # Switzerland (Neutral, strict privacy laws)
-    - '[https://dns.digitale-gesellschaft.ch/dns-query] socks5://127.0.0.1:9050'
-    # Austria (Neutral EU, GDPR compliant)
-    - '[https://doh.applied-privacy.net/query] socks5://127.0.0.1:9050'
-    # Sweden (Mullvad zero-logs DoH)
-    - '[https://base.dns.mullvad.net/dns-query] socks5://127.0.0.1:9050'
-    # Germany (DNS.SB, uncensored & zero-logs)
-    - '[https://doh.dns.sb/dns-query] socks5://127.0.0.1:9050'
-    # Global Swiss Foundation (Quad9, malicious domain filtering)
-    - '[https://dns.quad9.net/dns-query] socks5://127.0.0.1:9050'
-    # Cloudflare Security (1.1.1.2 malware blocking)
-    - '[https://security.cloudflare-dns.com/dns-query] socks5://127.0.0.1:9050'
-    # Control D (Malware & tracker blocking)
-    - '[https://freedns.controld.com/p2] socks5://127.0.0.1:9050'
-    # Native Tor .onion resolver integration
+    # Quad9 (Suiza, filtrado de malware, valida DNSSEC)
+    - https://9.9.9.9/dns-query
+    - https://149.112.112.112/dns-query
+    # Cloudflare (sin filtrado)
+    - https://1.1.1.1/dns-query
+    - https://1.0.0.1/dns-query
+    # AdGuard DNS (filtrado)
+    - https://94.140.14.14/dns-query
+    # Resolutor nativo de Tor para .onion (IP virtual, no sale de Tor)
     - '[/onion/]127.0.0.1:5350'
+    #
+    # Alternativas (conviertelas a su IP si las usas, por el motivo de arriba):
+    # - https://dns.digitale-gesellschaft.ch/dns-query   # Suiza
+    # - https://doh.applied-privacy.net/query            # Austria, GDPR
+    # - https://base.dns.mullvad.net/dns-query           # Mullvad
+    # - https://doh.dns.sb/dns-query                     # DNS.SB
+    # - https://security.cloudflare-dns.com/dns-query    # 1.1.1.2
 
   upstream_dns_file: ""
 

@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# 🛡️ Fortress Verification & Health Diagnostics Suite (10-Point Audit)
+# 🛡️ Fortress Verification & Health Diagnostics Suite (16-Point Audit)
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # ==============================================================================
@@ -153,6 +153,94 @@ Assert-Check "Neutralización de secuestro de puerto 53 (SharedAccess/ICS)" {
         return $true
     }
     Write-Host " (SharedAccess status: $($sa.Status), IcsDnsEnabled: $reg -> Ejecuta scripts/install_fortress.ps1) " -NoNewline -ForegroundColor Yellow
+    return $false
+}
+
+# 11. ACL de secretos (config\.env)
+Assert-Check "Permisos de config\.env restringidos (sin Usuarios/AppContainer)" {
+    $envFile = Join-Path $env:FORTRESS_DIR "config\.env"
+    if (-not (Test-Path $envFile)) {
+        $envFile = "C:\AdGuardHome\config\.env"
+    }
+    if (-not (Test-Path $envFile)) {
+        Write-Host " (no existe .env; credenciales no configuradas) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $acl = Get-Acl $envFile
+    $generic = @($acl.Access | Where-Object {
+        $_.IdentityReference -match 'Everyone|Users|Usuarios|Authenticated|Autenticados|S-1-15-3'
+    })
+    if ($generic.Count -gt 0) {
+        Write-Host " (acceso generico: $($generic[0].IdentityReference) -> scripts\harden-env-acl.ps1) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    return $true
+}
+
+# 12. Reglas anti-fuga ampliadas (853/TCP y 5353/UDP)
+Assert-Check "Reglas anti-fuga DoT 853 y mDNS 5353 activas" {
+    $names = @('AdGuard_Block_Outbound_DOT_853', 'AdGuard_Block_Outbound_MDNS')
+    $missing = @()
+    foreach ($n in $names) {
+        $r = Get-NetFirewallRule -Name $n -ErrorAction SilentlyContinue
+        if (-not $r -or $r.Enabled -ne 'True') { $missing += $n }
+    }
+    if ($missing.Count -eq 0) { return $true }
+    Write-Host " (faltan o desactivadas: $($missing -join ', ') -> install_fortress.ps1) " -NoNewline -ForegroundColor Yellow
+    return "WARN"
+}
+
+# 13. Frescura del heartbeat del watchdog
+Assert-Check "Heartbeat del watchdog reciente (< 120 s)" {
+    $hb = Join-Path $env:FORTRESS_DIR "watchdog.heartbeat"
+    if (-not (Test-Path $hb)) { $hb = "C:\AdGuardHome\watchdog.heartbeat" }
+    if (-not (Test-Path $hb)) {
+        Write-Host " (sin heartbeat: watchdog no ejecutado) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $age = ((Get-Date) - (Get-Item $hb).LastWriteTime).TotalSeconds
+    Write-Host "($([int]$age)s) " -NoNewline -ForegroundColor Gray
+    return ($age -lt 120)
+}
+
+# 14. Tarea programada del failsafe
+Assert-Check "Tarea programada del failsafe registrada" {
+    $t = Get-ScheduledTask -TaskName "AdGuardHome_Fortress_Failsafe" -ErrorAction SilentlyContinue
+    if ($t) { return $true }
+    Write-Host " (no registrada -> install_fortress.ps1 la crea) " -NoNewline -ForegroundColor Yellow
+    return "WARN"
+}
+
+# 15. DoH propio del navegador desactivado
+Assert-Check "DoH del navegador desactivado por politica (Chrome/Edge)" {
+    $chrome = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome' -Name 'DnsOverHttpsMode' -ErrorAction SilentlyContinue
+    $edge = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name 'DnsOverHttpsMode' -ErrorAction SilentlyContinue
+    if (($chrome -eq 'off') -and ($edge -eq 'off')) { return $true }
+    Write-Host " (chrome=$chrome edge=$edge -> scripts\harden-browser-doh.ps1) " -NoNewline -ForegroundColor Yellow
+    return "WARN"
+}
+
+# 16. Integridad del binario de AdGuard Home
+Assert-Check "Integridad del binario de AdGuardHome (hash registrado)" {
+    $exe = Join-Path $env:FORTRESS_DIR "AdGuardHome.exe"
+    if (-not (Test-Path $exe)) { $exe = "C:\AdGuardHome\AdGuardHome.exe" }
+    if (-not (Test-Path $exe)) {
+        Write-Host " (binario no encontrado) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $hashFile = Join-Path (Split-Path $exe) "data\adguard-home.sha256"
+    $current = (Get-FileHash -Path $exe -Algorithm SHA256).Hash
+    if (-not (Test-Path $hashFile)) {
+        try {
+            New-Item -ItemType Directory -Path (Split-Path $hashFile) -Force | Out-Null
+            Set-Content -Path $hashFile -Value $current -Encoding ASCII
+        } catch { }
+        Write-Host "(hash inicial registrado) " -NoNewline -ForegroundColor Gray
+        return $true
+    }
+    $expected = (Get-Content $hashFile -Raw).Trim()
+    if ($expected -eq $current) { return $true }
+    Write-Host " (el binario cambio desde el ultimo registro; revisa la actualizacion) " -NoNewline -ForegroundColor Yellow
     return $false
 }
 

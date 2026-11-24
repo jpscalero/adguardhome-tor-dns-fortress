@@ -218,3 +218,57 @@ Toda la documentación técnica exhaustiva está disponible en la **[Wiki Oficia
 * **Historial de Cambios**: Consulta [CHANGELOG.md](CHANGELOG.md).
 * **Seguridad y Reportes**: Consulta [SECURITY.md](SECURITY.md).
 * **Guía de Contribución**: Consulta [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## 🧭 Estado del proyecto y fases
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| 1. Profesionalización | CI real (PowerShell, Node, config, secretos, docs), plantillas de issues y PR, `NOTICE`, `docs/LIMITS.md` | ✅ |
+| 2. Correcciones de producción | Failsafe de red, ACL de `config/.env`, Node portable con SHA256, lanzadores `.cmd`/`.vbs` y watchdog sin bucles | ✅ |
+| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 16 pruebas | ✅ |
+| 4. Operación | Desinstalador con rollback, tests sin red, `-DryRun` en el instalador, perfil Docker/Linux | ✅ |
+
+## 🔒 Privacidad del centinela: AI_MODE
+
+El centinela necesita ver dominios para detectar DGA y beaconing, y eso choca con
+la promesa de privacidad. `AI_MODE` hace el compromiso explícito:
+
+| Modo | Qué sale del equipo | Detección | Uso recomendado |
+|---|---|---|---|
+| `off` | Nada | Heurística local | Máxima privacidad |
+| `local` | Nada (modelo en `127.0.0.1:11434`) | Modelo local | Con GPU/RAM suficiente |
+| `aggregate` *(por defecto)* | Hash con sal + entropía, longitud y TLD | Media | Uso diario |
+| `full` | Dominio completo a Gemini | Alta | Depuración |
+
+## 🧪 Verificación
+
+```powershell
+# Suite completa (requiere administrador)
+powershell -ExecutionPolicy Bypass -File scripts\test_fortress.ps1
+
+# Tests unitarios del centinela (sin red, sin admin, sin credenciales)
+node --test tests/
+
+# Invariantes de configuración (YAML + garantías de privacidad)
+python tools/validate_fortress_config.py
+```
+
+## 🆘 Si algo falla
+
+1. **Sin Internet tras un cambio**: `powershell -ExecutionPolicy Bypass -File scripts\failsafe-dns.ps1 -Trace`
+2. **Sin resolución en general**: revisa `failsafe.log`; el modo emergencia deja DNS público.
+3. **Volver atrás del todo**: `scripts\uninstall_fortress.ps1` (conserva datos salvo `-RemoveData`).
+4. Guía completa en [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## 📚 Documentación
+
+| Documento | Contenido |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Diseño y flujo de datos |
+| [docs/LIMITS.md](docs/LIMITS.md) | Qué NO protege la fortaleza |
+| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | Modelo de amenazas |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Fallos típicos y solución |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Qué falta y en qué orden |
+| [docs/LINUX.md](docs/LINUX.md) | Perfil Linux/Docker |

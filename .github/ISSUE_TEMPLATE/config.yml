@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Cómo reportar una vulnerabilidad
+    url: https://github.com/jpscalero/adguardhome-tor-dns-fortress/blob/main/SECURITY.md
+    about: No abras un issue público para fallos de seguridad. Sigue SECURITY.md.
+  - name: Documentación y arquitectura
+    url: https://github.com/jpscalero/adguardhome-tor-dns-fortress/tree/main/docs
+    about: Modelo de amenazas, límites y resolución de problemas.

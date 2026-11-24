@@ -292,23 +292,86 @@ while ($true) {
                 Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*ai_dns_guard.js*" }
 
             if (-not $aiProc) {
-                Write-WatchdogLog "WARN" "Centinela AI (ai_dns_guard.js) no esta en ejecucion. Relanzando..."
-                $vbsPath = Join-Path $AdGuardDir "ocultar_guardia.vbs"
-                if (-not (Test-Path $vbsPath)) {
-                    $vbsPath = Join-Path (Split-Path $AdGuardDir) "launchers\start_ai_guard.vbs"
+                # ------------------------------------------------------------------
+                # Guardas anti-bucle (Fase 2):
+                #  - sin credenciales validas el centinela sale con codigo 1 y el
+                #    watchdog lo relanzaria cada 30 s para siempre;
+                #  - si ya hay un lanzador en vuelo, no se lanza otro (esto causo
+                #    una fuga de 188 procesos wscript).
+                # ------------------------------------------------------------------
+                if ($null -eq $script:launchBackoff) { $script:launchBackoff = @{} }
+
+                $envFile = Join-Path $AdGuardDir "config\.env"
+                $hasAghPass = $false
+                $hasGeminiKey = $false
+                $aiMode = "aggregate"
+                if (Test-Path $envFile) {
+                    try {
+                        $envText = Get-Content -Path $envFile -Raw -ErrorAction Stop
+                        $hasAghPass = [bool]($envText -match "ADGUARD_PASSWORD\s*=\s*\S")
+                        $hasGeminiKey = [bool]($envText -match "GEMINI_API_KEY\s*=\s*\S")
+                        $modeMatch = [regex]::Match($envText, "(?m)^\s*AI_MODE\s*=\s*(\w+)")
+                        if ($modeMatch.Success) { $aiMode = $modeMatch.Groups[1].Value.ToLowerInvariant() }
+                    } catch {
+                        Write-WatchdogLog "WARN" "No se pudo leer config\.env: $($_.Exception.Message)"
+                    }
                 }
-                if (Test-Path $vbsPath) {
-                    Start-Process -FilePath "wscript.exe" -ArgumentList $vbsPath -WindowStyle Hidden
-                    Start-Sleep -Seconds 2
+
+                $needsKey = ($aiMode -ne "off")
+                $aiLauncher = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        $_.CommandLine -and (
+                            $_.CommandLine -like "*start_ai_guard*" -or
+                            $_.CommandLine -like "*ocultar_guardia*" -or
+                            $_.CommandLine -like "*ai_dns_guard.js*"
+                        )
+                    }
+
+                $last = $script:launchBackoff["ai"]
+                $cooling = ($last -and ((Get-Date) - $last).TotalSeconds -lt 300)
+
+                if (-not $hasAghPass -or ($needsKey -and -not $hasGeminiKey)) {
+                    if (-not $cooling) {
+                        Write-WatchdogLog "WARN" "Centinela AI sin credenciales (ADGUARD_PASSWORD/GEMINI_API_KEY) o AI_MODE invalido. No se relanza."
+                        $script:launchBackoff["ai"] = Get-Date
+                    }
+                } elseif ($aiLauncher) {
+                    if (-not $cooling) {
+                        Write-WatchdogLog "INFO" "Lanzador del centinela AI ya en curso; se espera a que arranque."
+                        $script:launchBackoff["ai"] = Get-Date
+                    }
+                } elseif ($cooling) {
+                    # Enfriamiento: evita relanzar en bucle si arranca y muere.
+                } else {
+                    Write-WatchdogLog "WARN" "Centinela AI (ai_dns_guard.js) no esta en ejecucion. Relanzando..."
+                    $script:launchBackoff["ai"] = Get-Date
+
+                    $cmdPath = Join-Path $AdGuardDir "start_ai_guard.cmd"
+                    $vbsPath = Join-Path $AdGuardDir "ocultar_guardia.vbs"
+                    if (-not (Test-Path $cmdPath)) { $cmdPath = Join-Path $AdGuardDir "launchers\start_ai_guard.cmd" }
+                    if (-not (Test-Path $vbsPath)) { $vbsPath = Join-Path $AdGuardDir "launchers\ocultar_guardia.vbs" }
+
+                    try {
+                        if (Test-Path $cmdPath) {
+                            Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
+                        } elseif (Test-Path $vbsPath) {
+                            Start-Process -FilePath "wscript.exe" -ArgumentList $vbsPath -WindowStyle Hidden
+                        } else {
+                            Write-WatchdogLog "ERROR" "No se encontro lanzador (start_ai_guard.cmd / ocultar_guardia.vbs)."
+                        }
+                    } catch {
+                        Write-WatchdogLog "ERROR" "Error lanzando centinela AI: $($_.Exception.Message)"
+                    }
+
+                    Start-Sleep -Seconds 3
                     $newAi = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
                         Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*ai_dns_guard.js*" }
                     if ($newAi) {
-                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Centinela AI relanzado con exito (PID: $($newAi.ProcessId))."
+                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Centinela AI relanzado con exito (PID: $($newAi[0].ProcessId))."
+                        $script:launchBackoff.Remove("ai")
                     } else {
-                        Write-WatchdogLog "ERROR" "Fallo el relanzamiento automatico de Centinela AI."
+                        Write-WatchdogLog "ERROR" "Fallo el relanzamiento automatico de Centinela AI. Reintento en 5 minutos."
                     }
-                } else {
-                    Write-WatchdogLog "ERROR" "No se encontro el lanzador VBS para Centinela AI."
                 }
             } elseif ($aiProc.Count -gt 1) {
                 # Deduplicate multiple instances
@@ -329,21 +392,56 @@ while ($true) {
                 Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*decoy_dns.js*" }
 
             if (-not $decoyProc) {
-                Write-WatchdogLog "WARN" "Generador Decoy DNS no esta en ejecucion. Relanzando..."
-                $vbsPath = Join-Path $AdGuardDir "ocultar_decoy.vbs"
-                if (-not (Test-Path $vbsPath)) {
-                    $vbsPath = Join-Path (Split-Path $AdGuardDir) "launchers\start_decoy.vbs"
-                }
-                if (Test-Path $vbsPath) {
-                    Start-Process -FilePath "wscript.exe" -ArgumentList $vbsPath -WindowStyle Hidden
-                    Start-Sleep -Seconds 2
+                if ($null -eq $script:launchBackoff) { $script:launchBackoff = @{} }
+
+                $decoyLauncher = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        $_.CommandLine -and (
+                            $_.CommandLine -like "*start_decoy*" -or
+                            $_.CommandLine -like "*ocultar_decoy*" -or
+                            $_.CommandLine -like "*decoy_dns.js*"
+                        )
+                    }
+                $lastDecoy = $script:launchBackoff["decoy"]
+                $coolingDecoy = ($lastDecoy -and ((Get-Date) - $lastDecoy).TotalSeconds -lt 300)
+
+                if ($decoyLauncher) {
+                    if (-not $coolingDecoy) {
+                        Write-WatchdogLog "INFO" "Lanzador del generador decoy ya en curso; se espera a que arranque."
+                        $script:launchBackoff["decoy"] = Get-Date
+                    }
+                } elseif ($coolingDecoy) {
+                    # Enfriamiento activo: no duplicar lanzamientos.
+                } else {
+                    Write-WatchdogLog "WARN" "Generador Decoy DNS no esta en ejecucion. Relanzando..."
+                    $script:launchBackoff["decoy"] = Get-Date
+
+                    $cmdPath = Join-Path $AdGuardDir "start_decoy.cmd"
+                    $vbsPath = Join-Path $AdGuardDir "ocultar_decoy.vbs"
+                    if (-not (Test-Path $cmdPath)) { $cmdPath = Join-Path $AdGuardDir "launchers\start_decoy.cmd" }
+                    if (-not (Test-Path $vbsPath)) { $vbsPath = Join-Path $AdGuardDir "launchers\ocultar_decoy.vbs" }
+
+                    try {
+                        if (Test-Path $cmdPath) {
+                            Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
+                        } elseif (Test-Path $vbsPath) {
+                            Start-Process -FilePath "wscript.exe" -ArgumentList $vbsPath -WindowStyle Hidden
+                        } else {
+                            Write-WatchdogLog "ERROR" "No se encontro lanzador (start_decoy.cmd / ocultar_decoy.vbs)."
+                        }
+                    } catch {
+                        Write-WatchdogLog "ERROR" "Error lanzando generador decoy: $($_.Exception.Message)"
+                    }
+
+                    Start-Sleep -Seconds 3
                     $newDecoy = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
                         Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*decoy_dns.js*" }
                     if ($newDecoy) {
-                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Generador Decoy DNS relanzado con exito (PID: $($newDecoy.ProcessId))."
+                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Generador Decoy DNS relanzado con exito (PID: $($newDecoy[0].ProcessId))."
+                        $script:launchBackoff.Remove("decoy")
+                    } else {
+                        Write-WatchdogLog "ERROR" "Fallo el relanzamiento del generador decoy. Reintento en 5 minutos."
                     }
-                } else {
-                    Write-WatchdogLog "ERROR" "No se encontro el lanzador VBS para Decoy DNS."
                 }
             } elseif ($decoyProc.Count -gt 1) {
                 # Deduplicate multiple instances

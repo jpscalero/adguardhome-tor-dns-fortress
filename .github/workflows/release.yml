@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Empaquetar y publicar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir paquete
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"
+          OUT="dist/fortress-${VER}"
+          mkdir -p "$OUT"
+          cp -r scripts config launchers docs tests "$OUT"/
+          cp -r tools "$OUT"/ 2>/dev/null || true
+          cp README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md NOTICE LICENSE package.json "$OUT"/
+          cd dist
+          zip -r "fortress-${VER}.zip" "fortress-${VER}" -x '*.DS_Store'
+          sha256sum "fortress-${VER}.zip" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publicar release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/fortress-*.zip
+            dist/SHA256SUMS
+          generate_release_notes: true
+          body_path: docs/RELEASE-NOTES.md
+          fail_on_unmatched_files: true

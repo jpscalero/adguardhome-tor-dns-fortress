@@ -12,6 +12,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Portable paths — resolve relative to script location or use env overrides
 const BASE_DIR = process.env.FORTRESS_DIR || path.join(__dirname, '..');
@@ -81,9 +82,109 @@ const AGH_USER = env.ADGUARD_USERNAME || process.env.ADGUARD_USERNAME || 'admin'
 const AGH_PASS = env.ADGUARD_PASSWORD || process.env.ADGUARD_PASSWORD;
 const GEMINI_KEY = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
-if (!AGH_PASS || !GEMINI_KEY) {
-  log('❌ ERROR: Missing credentials. Set ADGUARD_PASSWORD and GEMINI_API_KEY in .env or environment.');
-  process.exit(1);
+// ─── Modo de privacidad del analisis (Fase 3) ───────────────────────────────
+// off       : cero llamadas externas; decide la heuristica local.
+// local     : el dominio se analiza en un modelo local (Ollama por defecto).
+// aggregate : a la nube solo viajan un hash con sal y metadatos estructurales.
+// full      : se envia el dominio completo (maxima deteccion, cero privacidad).
+const AI_MODE_RAW = (env.AI_MODE || process.env.AI_MODE || 'aggregate').toLowerCase();
+const AI_MODE = ['off', 'local', 'aggregate', 'full'].includes(AI_MODE_RAW) ? AI_MODE_RAW : 'aggregate';
+const AI_LOCAL_URL = env.AI_LOCAL_URL || process.env.AI_LOCAL_URL || 'http://127.0.0.1:11434';
+const AI_LOCAL_MODEL = env.AI_LOCAL_MODEL || process.env.AI_LOCAL_MODEL || 'llama3.2';
+const AI_SALT_PATH = path.join(BASE_DIR, 'data', 'ai_salt.txt');
+
+// Sal estable por instalacion: sin ella, el hash del dominio seria reversible
+// por diccionario (los dominios son un espacio pequeno).
+function ensureHashSalt() {
+  if (process.env.AI_HASH_SALT) return process.env.AI_HASH_SALT;
+  try {
+    if (fs.existsSync(AI_SALT_PATH)) {
+      const existing = fs.readFileSync(AI_SALT_PATH, 'utf8').trim();
+      if (existing.length >= 16) return existing;
+    }
+    ensureDir(AI_SALT_PATH);
+    const generated = crypto.randomBytes(24).toString('hex');
+    fs.writeFileSync(AI_SALT_PATH, generated, { encoding: 'utf8', mode: 0o600 });
+    return generated;
+  } catch (e) {
+    return 'fortress-fallback-salt';
+  }
+}
+
+const HASH_SALT = ensureHashSalt();
+
+// Sustituye el dominio por un hash con sal + metadatos estructurales.
+function redactDomain(domain) {
+  const apex = extractApexLabel(domain);
+  const entropy = calculateEntropy(apex);
+  const digits = (apex.match(/\d/g) || []).length;
+  const parts = domain.split('.');
+  const tld = parts.length > 1 ? parts[parts.length - 1] : '';
+  const digest = crypto.createHash('sha256').update(HASH_SALT + domain).digest('hex').slice(0, 20);
+  return `sha256:${digest} (tld=${tld}, apex_len=${apex.length}, entropy=${entropy.toFixed(2)}, digits=${digits})`;
+}
+
+// Heuristica local: la misma que se usa en modo off o cuando no hay API.
+// Deliberadamente conservadora para no romper servicios legitimos.
+function heuristicVerdict(apex, entropy) {
+  const digits = (apex.match(/\d/g) || []).length;
+  const letters = (apex.match(/[a-z]/gi) || []).length;
+  if (entropy > 4.3) return 'MALICIOUS';
+  if (apex.length >= 20 && digits >= 3 && letters >= 3 && entropy > 3.6) return 'MALICIOUS';
+  return 'SAFE';
+}
+
+function assertCredentials() {
+  if (!AGH_PASS) {
+    log('❌ ERROR: falta ADGUARD_PASSWORD en config/.env o en el entorno.');
+    return false;
+  }
+  if (AI_MODE !== 'off' && AI_MODE !== 'local' && !GEMINI_KEY) {
+    log('⚠️ AVISO: AI_MODE=' + AI_MODE + ' sin GEMINI_API_KEY; se usara la heuristica local.');
+  }
+  return true;
+}
+
+// Modelo local (Ollama). El dominio no sale del equipo.
+function askLocalModel(domain, details, resolve) {
+  let settled = false;
+  const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+  const prompt = `You are a cybersecurity analyst. Answer only MALICIOUS or SAFE for the domain "${domain}". Details: ${details}`;
+  const payload = JSON.stringify({ model: AI_LOCAL_MODEL, prompt, stream: false });
+
+  let url;
+  try {
+    url = new URL(AI_LOCAL_URL + '/api/generate');
+  } catch (e) {
+    done(heuristicVerdict(extractApexLabel(domain), calculateEntropy(extractApexLabel(domain))));
+    return;
+  }
+
+  const req = http.request({
+    hostname: url.hostname,
+    port: url.port || 11434,
+    path: url.pathname,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    timeout: 20000,
+  }, (res) => {
+    let data = '';
+    res.on('data', (chunk) => data += chunk);
+    res.on('end', () => {
+      try {
+        const json = JSON.parse(data);
+        const answer = String(json.response || '').toUpperCase();
+        done(answer.includes('MALICIOUS') ? 'MALICIOUS' : 'SAFE');
+      } catch (e) {
+        done(heuristicVerdict(extractApexLabel(domain), calculateEntropy(extractApexLabel(domain))));
+      }
+    });
+    res.on('error', () => done(heuristicVerdict(extractApexLabel(domain), calculateEntropy(extractApexLabel(domain)))));
+  });
+  req.on('error', () => done(heuristicVerdict(extractApexLabel(domain), calculateEntropy(extractApexLabel(domain)))));
+  req.on('timeout', () => { req.destroy(); done(heuristicVerdict(extractApexLabel(domain), calculateEntropy(extractApexLabel(domain)))); });
+  req.write(payload);
+  req.end();
 }
 
 // ─── Domain Cache ───────────────────────────────────────────────────────────
@@ -257,7 +358,26 @@ function askGemini(domain, details) {
     let settled = false;
     const safeResolve = (val) => { if (!settled) { settled = true; resolve(val); } };
 
-    const prompt = `You are an elite cybersecurity threat analyst. Analyze this domain queried by a computer: "${domain}".
+    const apexLabel = extractApexLabel(domain);
+    const apexEntropy = calculateEntropy(apexLabel);
+
+    // Enrutado por AI_MODE: nada sale del equipo salvo en aggregate/full.
+    if (AI_MODE === 'off') {
+      safeResolve(heuristicVerdict(apexLabel, apexEntropy));
+      return;
+    }
+    if (AI_MODE === 'local') {
+      askLocalModel(domain, details, safeResolve);
+      return;
+    }
+    if (AI_MODE === 'aggregate' && !GEMINI_KEY) {
+      safeResolve(heuristicVerdict(apexLabel, apexEntropy));
+      return;
+    }
+
+    // En aggregate el modelo nunca ve el dominio: solo su hash con sal.
+    const subject = AI_MODE === 'aggregate' ? redactDomain(domain) : domain;
+    const prompt = `You are an elite cybersecurity threat analyst. Analyze this domain metadata queried by a computer: "${subject}".
 Details: ${details}
 Analyze for Domain Generation Algorithms (DGA), botnet C2 beacons, infostealer beacons, phishing, or typosquatting.
 IMPORTANT: Legitimate cloud hosting, developer platforms, CDN hostnames, and hash-based deployment IDs (such as on Google Cloud, AWS, Azure, Cloudflare, GitHub) are SAFE unless there is strong evidence of malicious C2 activity or malware payload hosting.
@@ -450,29 +570,53 @@ async function scanRecentQueries() {
 }
 
 // ─── Startup ────────────────────────────────────────────────────────────────
-log('🛡️ AI DNS Guard v2.1 (Gemini 3.5 Flash Lite + DGA Apex + C2 Beaconing + Cloud Protect) activo.');
-log(`   📁 Base: ${BASE_DIR}`);
-log(`   🔗 AdGuard Home: http://${AGH_HOST}:${AGH_PORT}`);
-log(`   ⏱️  Intervalo de escaneo: ${SCAN_INTERVAL_MS / 1000}s`);
+function main() {
+  if (!assertCredentials()) {
+    process.exit(1);
+  }
 
-// Initial scan
-scanRecentQueries();
+  log('🛡️ AI DNS Guard v2.2 (modo ' + AI_MODE + ' + DGA Apex + C2 Beaconing + Cloud Protect) activo.');
+  log('   📁 Base: ' + BASE_DIR);
+  log('   🔗 AdGuard Home: http://' + AGH_HOST + ':' + AGH_PORT);
+  log('   ⏱️  Intervalo de escaneo: ' + (SCAN_INTERVAL_MS / 1000) + 's');
+  if (AI_MODE === 'aggregate') {
+    log('   🔒 Privacidad: solo se envia un hash con sal del dominio (nunca el nombre).');
+  } else if (AI_MODE === 'full') {
+    log('   ⚠️  Privacidad: AI_MODE=full envia el dominio completo a la API de Gemini.');
+  } else if (AI_MODE === 'local') {
+    log('   🏠 Privacidad: analisis local en ' + AI_LOCAL_URL + ' (' + AI_LOCAL_MODEL + ').');
+  } else {
+    log('   🛑 Privacidad: AI_MODE=off, sin llamadas externas.');
+  }
 
-// Recurring loop
-const scanTimer = setInterval(scanRecentQueries, SCAN_INTERVAL_MS);
+  scanRecentQueries();
+  const scanTimer = setInterval(scanRecentQueries, SCAN_INTERVAL_MS);
 
-// ─── Graceful Shutdown ──────────────────────────────────────────────────────
-function gracefulShutdown(signal) {
-  log(`🛑 Recibida señal ${signal}. Cerrando centinela de forma limpia...`);
-  try {
-    clearInterval(scanTimer);
-    saveCache();
-    httpAgent.destroy();
-    httpsAgent.destroy();
-  } catch (e) { /* silent */ }
-  process.exit(0);
+  function gracefulShutdown(signal) {
+    log('🛑 Recibida senal ' + signal + '. Cerrando centinela de forma limpia...');
+    try {
+      clearInterval(scanTimer);
+      saveCache();
+      httpAgent.destroy();
+      httpsAgent.destroy();
+    } catch (e) { /* silent */ }
+    process.exit(0);
+  }
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+if (require.main === module) {
+  main();
+}
 
+module.exports = {
+  AI_MODE,
+  calculateEntropy,
+  extractApexLabel,
+  detectBeaconing,
+  isKnownBenign,
+  redactDomain,
+  heuristicVerdict,
+};

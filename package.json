@@ -1,6 +1,6 @@
 {
   "name": "adguardhome-tor-dns-fortress",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Ultra-Hardened DNS Privacy & Anti-Censorship Fortress for Windows (AdGuard Home + Tor + GoodbyeDPI + AI Guard + Decoy)",
   "main": "scripts/ai_dns_guard.js",
   "engines": {
@@ -10,8 +10,11 @@
     "start:guard": "node scripts/ai_dns_guard.js",
     "start:decoy": "node scripts/decoy_dns.js",
     "test": "powershell.exe -ExecutionPolicy Bypass -File scripts/test_fortress.ps1",
-    "test:health": "powershell.exe -ExecutionPolicy Bypass -File scripts/test_fortress.ps1",
-    "postinstall": "node -e \"console.log('\\x1b[33m⚠️ AVISO: Para desplegar la fortaleza completa en Windows, ejecuta PowerShell como Administrador: powershell -ExecutionPolicy Bypass -File scripts/install_fortress.ps1\\x1b[0m')\""
+    "postinstall": "node -e \"console.log('\\x1b[33m⚠️ AVISO: Para desplegar la fortaleza completa en Windows, ejecuta PowerShell como Administrador: powershell -ExecutionPolicy Bypass -File scripts/install_fortress.ps1\\x1b[0m')\"",
+    "test:unit": "node --test tests/",
+    "validate:config": "python tools/validate_fortress_config.py",
+    "lint:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_fortress.ps1",
+    "test:health": "powershell.exe -ExecutionPolicy Bypass -File scripts/test_fortress.ps1"
   },
   "repository": {
     "type": "git",

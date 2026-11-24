@@ -1,0 +1,29 @@
+# Avisos de terceros y marcas
+
+Este repositorio **no redistribuye** binarios de terceros. Los scripts descargan o
+esperan software instalado por el usuario. Esta nota documenta licencias y marcas
+para que la distribución del proyecto (ZIP, fork, imagen) cumpla con cada autor.
+
+## Dependencias de ejecución
+
+| Componente | Titular | Licencia | Obligación si lo redistribuyes |
+|---|---|---|---|
+| AdGuard Home | AdGuard Software Ltd. | GPL-3.0 | Entregar el código fuente correspondiente (incluidas tus modificaciones al binario) y la licencia. No puedes añadir restricciones adicionales. |
+| Tor | The Tor Project, Inc. | BSD-3-Clause | Incluir el texto de la licencia y el aviso de copyright. |
+| GoodbyeDPI | ValdikSS | Apache-2.0 | Incluir LICENSE y NOTICE; conservar avisos; aviso de patentes del artículo 3. |
+| Node.js | OpenJS Foundation | MIT | Incluir licencia si empaquetas el runtime. |
+| AdGuard Home (listas) | HaGeZi, OISD y otros | Según cada lista | Atribuir la fuente de cada filtro. |
+
+## Marcas
+
+"AdGuard", "AdGuard Home", "Tor", "Windows" y "GoodbyeDPI" son marcas de sus
+respectivos titulares. Este proyecto es **independiente** y no está afiliado ni
+patrocinado por AdGuard Software Ltd., The Tor Project ni Microsoft.
+
+Al describir el proyecto, usa fórmulas del tipo "compatible con AdGuard Home" y
+no el logotipo o el nombre del producto como si fuera propio.
+
+## Software propio
+
+Los scripts, plantillas y documentación de este repositorio se publican bajo la
+licencia MIT incluida en `LICENSE`.

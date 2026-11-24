@@ -10,7 +10,10 @@
 param(
     [string]$TargetDir = "C:\AdGuardHome",
     [switch]$SkipTorInstall = $false,
-    [switch]$Force = $false
+    [switch]$Force = $false,
+    [switch]$DryRun = $false,
+    [switch]$SkipEnvAcl = $false,
+    [switch]$SkipBrowserDoh = $false
 )
 
 # Ensure script is running as Administrator
@@ -23,6 +26,27 @@ if (-not $isAdmin) {
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "   🚀 INSTALADOR AUTOMATIZADO - DNS PRIVACY FORTRESS     " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host ""
+
+# -DryRun: muestra el plan completo y sale sin tocar nada.
+if ($DryRun) {
+    Write-Host "MODO DRY-RUN: no se aplicara ningun cambio." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Plan de instalacion en ${TargetDir}:"
+    Write-Host "  1. Neutralizar SharedAccess (IcsDnsEnabled=0, triggers, arranque deshabilitado)"
+    Write-Host "  2. Copiar config/AdGuardHome.template.yaml si no existe"
+    Write-Host "  3. Desplegar config/torrc.template en las rutas de Tor detectadas"
+    Write-Host "  4. Copiar watchdog, failsafe, centinela, decoy, suite y lanzadores"
+    Write-Host "  5. Apuntar los adaptadores activos a 127.0.0.1"
+    Write-Host "  6. Crear reglas de firewall: 53/UDP, 53/TCP, 853/TCP, 5353/UDP"
+    Write-Host "  7. Registrar tareas: watchdog (boot) y failsafe (cada 2 min)"
+    Write-Host "  8. Restringir la ACL de config\.env"
+    Write-Host "  9. Desactivar el DoH propio de Chrome/Edge/Firefox"
+    Write-Host " 10. Ejecutar scripts/test_fortress.ps1"
+    Write-Host ""
+    Write-Host "Vuelve a ejecutarlo sin -DryRun para aplicar." -ForegroundColor Green
+    exit 0
+}
 Write-Host ""
 
 # 1. Neutralize Windows 11 Port 53 Hijack (SharedAccess / ICS)
@@ -93,7 +117,15 @@ if (Test-Path $torTemplate) {
 
 # 3. Copy scripts, launchers and diagnostic suite to AdGuardHome directory
 Write-Host "[3/6] Desplegando scripts de Centinela AI, Decoy, Watchdog y Lanzadores..." -ForegroundColor Yellow
-$scriptsToCopy = @("watchdog.ps1", "ai_dns_guard.js", "decoy_dns.js", "test_fortress.ps1")
+$scriptsToCopy = @(
+    "watchdog.ps1",
+    "failsafe-dns.ps1",
+    "harden-env-acl.ps1",
+    "harden-browser-doh.ps1",
+    "ai_dns_guard.js",
+    "decoy_dns.js",
+    "test_fortress.ps1"
+)
 foreach ($s in $scriptsToCopy) {
     $src = Join-Path $repoRoot "scripts\$s"
     if (Test-Path $src) {
@@ -105,6 +137,10 @@ foreach ($s in $scriptsToCopy) {
 $launchersDir = Join-Path $repoRoot "launchers"
 if (Test-Path $launchersDir) {
     Get-ChildItem -Path $launchersDir -Filter "*.vbs" | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination (Join-Path $TargetDir $_.Name) -Force
+    }
+    # Lanzadores .cmd (resuelven rutas y el node portable). Los VBS delegan en ellos.
+    Get-ChildItem -Path $launchersDir -Filter "*.cmd" -ErrorAction SilentlyContinue | ForEach-Object {
         Copy-Item -Path $_.FullName -Destination (Join-Path $TargetDir $_.Name) -Force
     }
     # Ensure standard aliases for watchdog compatibility
@@ -137,7 +173,9 @@ Write-Host "  -> Caché DNS de Windows purgada." -ForegroundColor Green
 Write-Host "[4.5/6] Configurando reglas de firewall anti-fugas (bloqueo de bypass UDP/TCP 53 saliente)..." -ForegroundColor Yellow
 $fwRules = @(
     @{ Name = "AdGuard_Block_Outbound_DNS_UDP"; Display = "AdGuard - Block Outbound Plaintext DNS UDP"; Protocol = "UDP"; Port = 53 },
-    @{ Name = "AdGuard_Block_Outbound_DNS_TCP"; Display = "AdGuard - Block Outbound Plaintext DNS TCP"; Protocol = "TCP"; Port = 53 }
+    @{ Name = "AdGuard_Block_Outbound_DNS_TCP"; Display = "AdGuard - Block Outbound Plaintext DNS TCP"; Protocol = "TCP"; Port = 53 },
+    @{ Name = "AdGuard_Block_Outbound_DOT_853"; Display = "AdGuard - Block Outbound DNS-over-TLS 853"; Protocol = "TCP"; Port = 853 },
+    @{ Name = "AdGuard_Block_Outbound_MDNS"; Display = "AdGuard - Block Outbound mDNS 5353"; Protocol = "UDP"; Port = 5353 }
 )
 foreach ($r in $fwRules) {
     if (-not (Get-NetFirewallRule -Name $r.Name -ErrorAction SilentlyContinue)) {
@@ -155,6 +193,41 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 365)
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -User "NT AUTHORITY\SYSTEM" -Force | Out-Null
 Write-Host "  -> Tarea programada '$taskName' registrada y activa." -ForegroundColor Green
+
+# 5.5. Register Failsafe Scheduled Task (cada 2 minutos)
+Write-Host "[5.5/6] Registrando failsafe de red (cada 2 minutos)..." -ForegroundColor Yellow
+$failsafeScript = Join-Path $TargetDir "failsafe-dns.ps1"
+if (Test-Path $failsafeScript) {
+    $failsafeTaskName = "AdGuardHome_Fortress_Failsafe"
+    $fsAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File `"$failsafeScript`""
+    $fsTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 2)
+    $fsSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName $failsafeTaskName -Action $fsAction -Trigger $fsTrigger -Settings $fsSettings -User "NT AUTHORITY\SYSTEM" -Force | Out-Null
+    Write-Host "  -> Tarea programada '$failsafeTaskName' registrada (cada 2 min)." -ForegroundColor Green
+} else {
+    Write-Host "  -> AVISO: no se encontro failsafe-dns.ps1; failsafe no registrado." -ForegroundColor Yellow
+}
+
+# 5.6. Hardening de secretos y DoH del navegador
+Write-Host "[5.6/6] Restringiendo permisos de config\.env y DoH del navegador..." -ForegroundColor Yellow
+$envFilePath = Join-Path $TargetDir "config\.env"
+if ((-not $SkipEnvAcl) -and (Test-Path $envFilePath)) {
+    $aclScript = Join-Path $TargetDir "harden-env-acl.ps1"
+    if (Test-Path $aclScript) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $aclScript -EnvFile $envFilePath
+        Write-Host "  -> ACL del .env restringida (SYSTEM + Administradores + propietario)." -ForegroundColor Green
+    }
+} elseif (-not $SkipEnvAcl) {
+    Write-Host "  -> AVISO: no existe config\.env todavia; crea tus credenciales y ejecuta scripts\harden-env-acl.ps1" -ForegroundColor Yellow
+}
+
+if (-not $SkipBrowserDoh) {
+    $browserScript = Join-Path $TargetDir "harden-browser-doh.ps1"
+    if (Test-Path $browserScript) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $browserScript
+        Write-Host "  -> DoH propio de los navegadores desactivado (Chrome/Edge/Firefox)." -ForegroundColor Green
+    }
+}
 
 # 6. Final verification
 Write-Host "[6/6] Ejecutando comprobación de salud del sistema..." -ForegroundColor Yellow

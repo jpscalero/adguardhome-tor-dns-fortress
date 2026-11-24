@@ -1,0 +1,86 @@
+name: Informe de fallo
+description: Algo no funciona (instalación, DNS, Tor, watchdog, centinela...)
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por informar. Antes de seguir, ejecuta **como administrador**:
+        `powershell -ExecutionPolicy Bypass -File scripts\test_fortress.ps1`
+        y adjunta la salida. No pegues claves ni contraseñas.
+
+  - type: textarea
+    id: que-pasa
+    attributes:
+      label: ¿Qué ocurre?
+      description: Describe el síntoma y el mensaje exacto.
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: ¿Qué esperabas que ocurriera?
+    validations:
+      required: true
+
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducirlo
+      placeholder: |
+        1. Ejecuté scripts\install_fortress.ps1
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: fase
+    attributes:
+      label: Componente afectado
+      options:
+        - Instalador
+        - DNS / AdGuard Home
+        - Tor (SOCKS5 / DNSPort)
+        - GoodbyeDPI
+        - Watchdog
+        - Failsafe
+        - Centinela AI
+        - Señuelo (decoy)
+        - Documentación
+        - Otro
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión del repo
+      description: Salida de `git rev-parse --short HEAD` o el tag (v1.0.0, etc.)
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows
+      placeholder: "Windows 11 24H2 build 26100.1234"
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostico
+    attributes:
+      label: Salida de test_fortress.ps1 y logs relevantes
+      description: Pega solo lo necesario. Revisa que no haya credenciales.
+      render: text
+
+  - type: checkboxes
+    id: privacidad
+    attributes:
+      label: Confirmación
+      options:
+        - label: He revisado que no incluyo contraseñas, claves API ni direcciones IP públicas
+          required: true

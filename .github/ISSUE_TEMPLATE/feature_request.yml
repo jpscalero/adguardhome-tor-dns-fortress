@@ -1,0 +1,54 @@
+name: Propuesta de mejora
+description: Nueva comprobación, endurecimiento o documentación
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Este proyecto sigue una regla: **nada de mejoras que rompan la conectividad sin un plan de vuelta atrás documentado**.
+
+  - type: textarea
+    id: problema
+    attributes:
+      label: ¿Qué problema de seguridad, privacidad o robustez resuelve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Propuesta concreta
+      description: Qué se añade, en qué fichero y cómo se comprueba.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impacto
+    attributes:
+      label: Impacto esperado
+      options:
+        - Solo documentación / plantillas
+        - Añade una comprobación a la suite
+        - Nuevo script opcional
+        - Cambia configuración por defecto (requiere plan de rollback)
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Plan de vuelta atrás
+      description: Cómo se revierte si el cambio deja el equipo sin DNS.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: alcance
+    attributes:
+      label: Alcance
+      options:
+        - label: No elimina funcionalidad existente
+          required: true
+        - label: Documentado en docs/ y con entrada en CHANGELOG.md
+          required: true

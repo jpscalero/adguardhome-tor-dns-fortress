@@ -6,7 +6,9 @@
 # ─── Core Network & Ports ───────────────────────────────────────────────────
 # SocksPort: SOCKS5 proxy on localhost with destination address/port isolation
 # prevents stream correlation across different DNS resolvers and applications.
-SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort
+# IsolateSOCKSAuth: cada aplicacion que use credenciales SOCKS distintas recibe
+# un circuito diferente. Evita que el navegador y el centinela compartan ruta.
+SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort IsolateSOCKSAuth
 
 # DNSPort: Local UDP DNS server provided by Tor for resolving .onion virtual IPs
 # and serving as fallback Tor resolver on port 5350.
@@ -26,6 +28,13 @@ SocksPolicy reject *
 # ─── Client Mode & Anti-Leak Hardening ──────────────────────────────────────
 # ClientOnly: Do not act as a relay, bridge, or directory server under any condition.
 ClientOnly 1
+
+# ClientUseIPv6 0: no intentar conexiones IPv6 hacia la red Tor cuando el ISP
+# solo entrega IPv4 por defecto; evita timeouts silenciosos de circuito.
+ClientUseIPv6 0
+
+# DNSPort solo en loopback y sin permitir consultas recursivas externas.
+# (DNSPort no acepta IsolateSOCKSAuth; el aislamiento va por SocksPort.)
 
 # SafeLogging: Scrubs all IP addresses and user data from Tor log output.
 SafeLogging 1

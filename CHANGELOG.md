@@ -4,6 +4,68 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/), y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-24
+
+Consolidación de las correcciones probadas en producción y de las mejoras de
+privacidad pendientes. Nada se elimina: todo lo de 1.0.0 sigue funcionando.
+
+### Añadido
+
+- **Failsafe de red (`scripts/failsafe-dns.ps1`)**: comprobación cada dos minutos
+  con sonda TCP al puerto 53. Restaura `127.0.0.1` y las reglas anti-fuga si
+  AdGuard responde, y pasa a modo emergencia (DNS público y reglas off) si no.
+  Nunca pisa un DNS ajeno a la fortaleza y soporta `-DryRun`, `-Trace` y `-Restore`.
+- **Endurecimiento de secretos (`scripts/harden-env-acl.ps1`)**: quita la herencia
+  de `config/.env`, deja solo SYSTEM, Administradores y el propietario, y guarda
+  la ACL original para revertir con `-Restore`.
+- **Node portable verificado (`scripts/bootstrap-node-portable.ps1`)**: descarga
+  el ZIP oficial, comprueba SHA256 contra `SHASUMS256.txt` y lo deja en
+  `<fortress>\node` sin tocar el registro (evita el error 1603 del MSI).
+- **Lanzadores robustos**: `launchers/start_ai_guard.cmd`, `start_decoy.cmd`,
+  `ocultar_guardia.vbs` y `ocultar_decoy.vbs` resuelven rutas y `node.exe`
+  portable, también cuando el watchdog los ejecuta como SYSTEM.
+- **DoH del navegador desactivado (`scripts/harden-browser-doh.ps1`)**: políticas
+  de Chrome, Edge y Firefox para que no se salten AdGuard Home, con `-Undo`.
+- **`AI_MODE` en el centinela**: `off`, `local` (Ollama), `aggregate` (hash con
+  sal, por defecto) y `full`. En `aggregate` el dominio nunca sale del equipo.
+- **Reglas anti-fuga ampliadas**: bloqueo saliente de 853/TCP (DoT) y 5353/UDP
+  (mDNS), además de 53/UDP y 53/TCP.
+- **Suite de 16 comprobaciones**: ACL del `.env`, reglas 853/mDNS, frescura del
+  heartbeat, tarea del failsafe, políticas de DoH e integridad del binario.
+- **Desinstalador (`scripts/uninstall_fortress.ps1`)**: deshace tareas, reglas,
+  DNS, políticas y ACL, con `-DryRun` y `-RemoveData` opcional.
+- **Tests unitarios sin red (`tests/*.test.js`)**: entropía, apex, beaconing,
+  redacción y heurística local con `node --test`.
+- **CI real**: workflow de PowerShell (sintaxis + PSScriptAnalyzer), Node
+  (sintaxis + tests), invariantes de configuración, gitleaks, actionlint y
+  markdownlint. Release automática por tag con `SHA256SUMS`.
+- **Plantillas**: issues de bug y de mejora, plantilla de PR, `CODEOWNERS`,
+  `dependabot.yml`, `NOTICE` de terceros y `docs/LIMITS.md`.
+- **Perfil Docker/Linux** en `docker/` (AdGuard Home + Tor) y `docs/LINUX.md`.
+
+### Cambiado
+
+- **Watchdog sin bucles de relanzamiento**: comprueba credenciales y `AI_MODE`
+  antes de arrancar el centinela, detecta lanzadores en vuelo y aplica un
+  enfriamiento de 5 minutos. Elimina la fuga de procesos `wscript` observada en
+  producción (188 procesos).
+- **`install_fortress.ps1`**: `-DryRun`, `-SkipEnvAcl`, `-SkipBrowserDoh`, copia
+  de los scripts nuevos, registro de la tarea del failsafe y ACL del `.env` al
+  final de la instalación.
+- **`torrc.template`**: `IsolateSOCKSAuth` en el `SocksPort` y `ClientUseIPv6 0`
+  para evitar timeouts silenciosos de circuito.
+- **Suite**: de 10 a 16 comprobaciones y cabecera actualizada.
+
+### Corregido
+
+- **Fuga de lectura de secretos**: la ACL heredada de `config/.env` incluía un
+  SID de contenedor de aplicaciones (`S-1-15-3-...`) y permitía leer la clave de
+  Gemini y la contraseña del panel a aplicaciones empaquetadas.
+- **Centinela sin credenciales**: ya no se relanza en bucle infinito; avisa una
+  vez y espera cinco minutos.
+- **`AI_MODE=aggregate` sin clave**: cae a la heurística local en lugar de
+  fallar.
+
 ## [1.0.0] - 2026-09-30
 
 ### Añadido

@@ -1,1 +1,107 @@
+name: CI
 
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: PowerShell (sintaxis + analizador)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parsear todos los .ps1
+        shell: pwsh
+        run: |
+          $failed = 0
+          Get-ChildItem -Path . -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in $errors) {
+              Write-Host ("::error file={0},line={1}::{2}" -f $_.FullName, $e.Extent.StartLineNumber, $e.Message)
+              $failed = 1
+            }
+          }
+          if ($failed -ne 0) { throw 'Errores de sintaxis en scripts PowerShell.' }
+          Write-Host 'Sintaxis PowerShell correcta.'
+
+      - name: PSScriptAnalyzer (errores bloquean, avisos informan)
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
+          $results = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+          $results | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+          $errors = @($results | Where-Object { $_.Severity -eq 'Error' })
+          if ($errors.Count -gt 0) { throw ("PSScriptAnalyzer: {0} error(es) bloqueantes." -f $errors.Count) }
+          Write-Host ("PSScriptAnalyzer: {0} aviso(s) informativos, 0 errores." -f $results.Count)
+
+  node:
+    name: Node (sintaxis + tests sin red)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Comprobación de sintaxis
+        run: |
+          set -e
+          for f in scripts/*.js tools/*.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      - name: Tests unitarios (sin red, sin admin)
+        run: node --test tests/
+
+  config:
+    name: Invariantes de configuración
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validar YAML y garantías de la fortaleza
+        run: |
+          python -m pip install --quiet pyyaml
+          python tools/validate_fortress_config.py
+
+  secrets:
+    name: Escaneo de secretos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docs:
+    name: Workflows y documentación
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: actionlint
+        uses: raven-actions/actionlint@v2
+
+      - name: markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: '**/*.md'

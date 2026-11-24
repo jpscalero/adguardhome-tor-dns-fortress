@@ -1,0 +1,60 @@
+# ==============================================================================
+# Perfil Docker (Linux): nucleo DNS+Tor de la fortaleza.
+#
+# Que incluye:    AdGuard Home con DoH sobre Tor.
+# Que NO incluye: watchdog, failsafe, centinela AI, senuelo y GoodbyeDPI.
+#                 Esos componentes son especificos de Windows; en Linux se
+#                 sustituyen por systemd + unbound (ver docs/LINUX.md).
+#
+# Uso:
+#   cd docker
+#   docker compose up -d
+#   -> panel: http://127.0.0.1:3000
+# ==============================================================================
+
+services:
+  tor:
+    image: alpine:3.20
+    container_name: fortress-tor
+    restart: unless-stopped
+    command: >
+      sh -c "apk add --no-cache tor &&
+             tor -f /etc/tor/torrc"
+    volumes:
+      - ./torrc:/etc/tor/torrc:ro
+      - tor-data:/var/lib/tor
+    ports:
+      - "127.0.0.1:9050:9050"
+      - "127.0.0.1:5350:5350/udp"
+    networks:
+      - fortress
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9050 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: fortress-adguard
+    restart: unless-stopped
+    depends_on:
+      tor:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:53:53/udp"
+      - "127.0.0.1:53:53/tcp"
+      - "127.0.0.1:3000:3000/tcp"
+    volumes:
+      - agh-work:/opt/adguardhome/work
+      - ./AdGuardHome.yaml:/opt/adguardhome/conf/AdGuardHome.yaml:ro
+    networks:
+      - fortress
+
+volumes:
+  tor-data:
+  agh-work:
+
+networks:
+  fortress:
+    driver: bridge

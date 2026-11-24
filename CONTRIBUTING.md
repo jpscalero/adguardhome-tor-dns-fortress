@@ -26,3 +26,28 @@
 4. **Commits y PRs**:
    - Usa Conventional Commits (`fix(...)`, `feat(...)`, `docs(...)`, `test(...)`).
    - Describe con claridad el problema resuelto y añade pruebas de verificación.
+
+## Comprobaciones antes de abrir un PR
+
+```powershell
+# 1. Sintaxis y analisis de PowerShell (en CI se ejecuta igual)
+powershell -NoProfile -Command "$e=$null;$t=$null;Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object { [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$t,[ref]$e); if ($e) { $_.FullName; $e } }"
+
+# 2. Tests unitarios del centinela (sin red ni credenciales)
+node --test tests/
+
+# 3. Invariantes de configuracion
+python tools/validate_fortress_config.py
+
+# 4. Suite real (requiere administrador y equipo con la fortaleza instalada)
+powershell -ExecutionPolicy Bypass -File scripts\test_fortress.ps1
+```
+
+Reglas del proyecto:
+
+- **No se elimina funcionalidad existente** sin justificarlo en el PR.
+- Todo cambio que toque DNS, firewall o tareas programadas debe documentar su
+  plan de vuelta atrás.
+- Los scripts PowerShell son ASCII puro (Windows PowerShell 5.1 falla con ciertos
+  caracteres no ASCII sin BOM).
+- Cada cambio relevante añade su entrada en `CHANGELOG.md`.
