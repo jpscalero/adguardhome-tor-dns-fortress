@@ -271,4 +271,5 @@ python tools/validate_fortress_config.py
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | Modelo de amenazas |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Fallos típicos y solución |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Qué falta y en qué orden |
+| [docs/ROADMAP-3.0.0.md](docs/ROADMAP-3.0.0.md) | Plan por versiones: 2.0.x → 3.0.0, con criterios de salida |
 | [docs/LINUX.md](docs/LINUX.md) | Perfil Linux/Docker |

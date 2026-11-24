@@ -1,5 +1,7 @@
 # Roadmap
 
+> Plan por versiones con criterios de salida: [ROADMAP-3.0.0.md](ROADMAP-3.0.0.md).
+
 Lo hecho está en el `CHANGELOG.md`. Aquí solo lo que **falta**, por orden de
 impacto real y con su motivo.
 
