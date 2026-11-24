@@ -1,0 +1,113 @@
+# ==============================================================================
+# AdGuard Home para el perfil Docker.
+#
+# Diferencias clave con config/AdGuardHome.template.yaml (Windows):
+#   1. Dentro del contenedor escucha en 0.0.0.0; el aislamiento se hace en el
+#      mapeo de puertos de docker-compose (127.0.0.1:53 y 127.0.0.1:3000).
+#      Si escuchara en 127.0.0.1 los puertos publicados no llegarian a nada.
+#   2. El proxy y el DNSPort apuntan al servicio "tor", no a 127.0.0.1 (que
+#      dentro de este contenedor seria el propio AdGuard).
+#   3. users: [] -> en el primer arranque el panel pide crear el administrador,
+#      asi no se publican credenciales por defecto en el repositorio.
+#
+# Validado con: AdGuardHome.exe --check-config
+# ==============================================================================
+
+schema_version: 35
+
+http:
+  address: 0.0.0.0:3000
+  session_ttl: 24h
+  doh:
+    routes:
+      - GET /dns-query
+      - POST /dns-query
+    insecure_enabled: false
+
+users: []
+auth_attempts: 5
+block_auth_min: 15
+
+# Cliente HTTP (y consultas DoH) a traves del SOCKS5 del servicio tor.
+http_proxy: socks5://tor:9050
+language: es
+theme: dark
+
+log:
+  enabled: true
+  file: ""
+  max_backoff: 1s
+  max_scan_depth: 100
+  interval: 24h
+  verbose: false
+
+dns:
+  bind_hosts:
+    - 0.0.0.0
+  port: 53
+
+  anonymize_client_ip: true
+  ratelimit: 40
+  ratelimit_whitelist:
+    - 127.0.0.1
+  refuse_any: true
+
+  # DoH por IP fija: no hay resolucion previa del hostname del resolutor.
+  upstream_dns:
+    - https://9.9.9.9/dns-query
+    - https://149.112.112.112/dns-query
+    - https://1.1.1.1/dns-query
+    - https://1.0.0.1/dns-query
+    - https://94.140.14.14/dns-query
+    # DNSPort del contenedor tor (UDP dentro de la red "fortress")
+    - '[/onion/]tor:5350'
+
+  upstream_mode: parallel
+  fastest_timeout: 2s
+  upstream_timeout: 10s
+
+  bootstrap_dns:
+    - 9.9.9.9
+    - 1.1.1.1
+
+  fallback_dns:
+    - 9.9.9.9
+    - 1.1.1.1
+
+  enable_dnssec: true
+  cache_enabled: true
+  cache_size: 33554432
+  cache_optimistic: true
+  cache_ttl_min: 300
+  cache_ttl_max: 86400
+  aaaa_disabled: true
+
+  private_networks: []
+  allowed_clients: []
+  disallowed_clients: []
+  blocked_hosts:
+    - version.bind
+    - id.server
+    - hostname.bind
+
+querylog:
+  enabled: true
+  interval: 24h
+  size_memory: 1000
+  file_enabled: false
+
+statistics:
+  enabled: true
+  interval: 24h
+
+filters:
+  - enabled: true
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.plus.txt
+    name: HaGeZi Pro++
+    id: 1
+  - enabled: true
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt
+    name: HaGeZi Threat Intelligence
+    id: 2
+
+user_rules: []

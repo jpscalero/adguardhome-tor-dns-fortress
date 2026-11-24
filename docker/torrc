@@ -1,0 +1,28 @@
+# Tor dentro de contenedor: solo cliente, escuchando en la red interna.
+# El aislamiento real lo hace el mapeo de puertos de docker-compose (127.0.0.1).
+
+SocksPort 0.0.0.0:9050 IsolateDestAddr IsolateDestPort IsolateSOCKSAuth
+DNSPort 0.0.0.0:5350
+
+ClientOnly 1
+SafeLogging 1
+AvoidDiskWrites 1
+ClientUseIPv6 0
+
+AutomapHostsOnResolve 1
+AutomapHostsSuffixes .onion,.exit
+VirtualAddrNetworkIPv4 10.192.0.0/10
+
+NumEntryGuards 3
+CircuitBuildTimeout 10
+KeepalivePeriod 60
+NewCircuitPeriod 30
+MaxCircuitDirtiness 1800
+ConnectionPadding 1
+EnforceDistinctSubnets 1
+
+# Baja privilegios tras abrir los puertos.
+User tor
+DataDirectory /var/lib/tor
+
+Log notice stdout

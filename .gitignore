@@ -37,3 +37,9 @@ Desktop.ini
 *.swp
 # Submodules & Separate Repos
 wiki/
+
+# Perfil Docker: configuraciones de contenedor versionadas.
+# No contienen secretos (users: [] -> el panel pide crear el administrador),
+# pero las reglas de arriba las excluirian y el perfil quedaria roto.
+!docker/AdGuardHome.yaml
+!docker/torrc
