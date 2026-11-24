@@ -7,10 +7,9 @@
 #      Si escuchara en 127.0.0.1 los puertos publicados no llegarian a nada.
 #   2. El proxy y el DNSPort apuntan al servicio "tor", no a 127.0.0.1 (que
 #      dentro de este contenedor seria el propio AdGuard).
-#   3. users: [] -> en el primer arranque el panel pide crear el administrador,
-#      asi no se publican credenciales por defecto en el repositorio.
+#   3. No se publican credenciales por defecto (ver "users" mas abajo).
 #
-# Validado con: AdGuardHome.exe --check-config
+# Validado con: AdGuardHome.exe --check-config  ->  "configuration file is ok"
 # ==============================================================================
 
 schema_version: 35
@@ -24,7 +23,18 @@ http:
       - POST /dns-query
     insecure_enabled: false
 
+# USUARIOS: con la lista vacia, AdGuard Home desactiva la autenticacion (lo dice
+# el propio --check-config). El panel queda accesible sin login en el puerto
+# publicado, que solo escucha en 127.0.0.1 del host, pero es mejor cerrarlo.
+#
+# Antes del primer arranque, genera el hash y declaralo:
+#   htpasswd -bnBC 10 "" "tu_contrasena" | tr -d ':\n'
+#
+# users:
+#   - name: admin
+#     password: '$2y$10$REEMPLAZA_ESTO_POR_TU_HASH'
 users: []
+
 auth_attempts: 5
 block_auth_min: 15
 

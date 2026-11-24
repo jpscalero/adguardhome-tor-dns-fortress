@@ -10,8 +10,19 @@ cd docker
 docker compose up -d --build
 ```
 
-- Panel: <http://127.0.0.1:3000> — la primera vez pide crear el administrador
-  (`users: []` en `AdGuardHome.yaml`, así no hay credenciales por defecto).
+- Panel: <http://127.0.0.1:3000>.
+
+> **Antes del primer arranque, crea el administrador.** Con `users: []` AdGuard
+> Home **desactiva la autenticación** (es lo que responde `--check-config`), así
+> que el panel queda sin login. Solo escucha en `127.0.0.1`, pero ciérralo:
+>
+> ```bash
+> htpasswd -bnBC 10 "" "tu_contrasena" | tr -d ':
+'
+> # pega el hash en docker/AdGuardHome.yaml -> users: - name: admin / password: '...'
+> ```
+>
+> El repositorio no incluye credenciales por defecto a propósito.
 - DNS: `127.0.0.1:53` (UDP y TCP).
 
 ## Por qué `0.0.0.0` dentro y `127.0.0.1` fuera
