@@ -1,27 +1,28 @@
 # ==============================================================================
 # Perfil Docker (Linux): nucleo DNS+Tor de la fortaleza.
 #
-# Que incluye:    AdGuard Home con DoH sobre Tor.
-# Que NO incluye: watchdog, failsafe, centinela AI, senuelo y GoodbyeDPI.
-#                 Esos componentes son especificos de Windows; en Linux se
-#                 sustituyen por systemd + unbound (ver docs/LINUX.md).
+# Incluye:    AdGuard Home con DoH sobre Tor.
+# No incluye: watchdog, failsafe, centinela AI, senuelo y GoodbyeDPI (Windows).
+#
+# Aislamiento: dentro de los contenedores se escucha en 0.0.0.0, pero los
+# puertos publicados se mapean SOLO a 127.0.0.1 del host. Si se mapearan a
+# 0.0.0.0:53 estarias sirviendo DNS a toda la red sin querer.
 #
 # Uso:
 #   cd docker
-#   docker compose up -d
-#   -> panel: http://127.0.0.1:3000
+#   docker compose up -d --build
+#   -> panel: http://127.0.0.1:3000  (pide crear el administrador la 1a vez)
 # ==============================================================================
 
 services:
   tor:
-    image: alpine:3.20
+    build:
+      context: .
+      dockerfile: Dockerfile.tor
+    image: fortress-tor:2.0.0
     container_name: fortress-tor
     restart: unless-stopped
-    command: >
-      sh -c "apk add --no-cache tor &&
-             tor -f /etc/tor/torrc"
     volumes:
-      - ./torrc:/etc/tor/torrc:ro
       - tor-data:/var/lib/tor
     ports:
       - "127.0.0.1:9050:9050"
@@ -32,6 +33,7 @@ services:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 9050 || exit 1"]
       interval: 30s
       timeout: 5s
+      start_period: 45s
       retries: 3
 
   adguardhome:
@@ -47,9 +49,15 @@ services:
       - "127.0.0.1:3000:3000/tcp"
     volumes:
       - agh-work:/opt/adguardhome/work
-      - ./AdGuardHome.yaml:/opt/adguardhome/conf/AdGuardHome.yaml:ro
+      - ./AdGuardHome.yaml:/opt/adguardhome/conf/AdGuardHome.yaml
     networks:
       - fortress
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
 
 volumes:
   tor-data:
