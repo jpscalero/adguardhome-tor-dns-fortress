@@ -20,15 +20,15 @@ jobs:
         run: |
           set -euo pipefail
           VER="${GITHUB_REF_NAME}"
-          OUT="dist/fortress-${VER}"
-          mkdir -p "$OUT"
-          cp -r scripts config launchers docs tests "$OUT"/
-          cp -r tools "$OUT"/ 2>/dev/null || true
-          cp README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md NOTICE LICENSE package.json "$OUT"/
-          cd dist
-          zip -r "fortress-${VER}.zip" "fortress-${VER}" -x '*.DS_Store'
-          sha256sum "fortress-${VER}.zip" > SHA256SUMS
-          cat SHA256SUMS
+          mkdir -p dist
+          # git archive empaqueta exactamente lo versionado: sin listas manuales
+          # que se olviden de docker/ o .github/ (paso en v2.0.0).
+          git archive --format=zip --prefix="fortress-${VER}/" -o "dist/fortress-${VER}.zip" HEAD
+          ( cd dist && sha256sum "fortress-${VER}.zip" > SHA256SUMS )
+          echo "--- contenido ---"
+          cat dist/SHA256SUMS
+          echo "--- resumen del zip ---"
+          unzip -l "dist/fortress-${VER}.zip" | tail -3
 
       - name: Publicar release
         uses: softprops/action-gh-release@v2

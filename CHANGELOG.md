@@ -4,6 +4,15 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/), y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-11-24
+
+### Corregido
+
+- **Paquete de la release incompleto**: el workflow copiaba carpetas con una
+  lista manual y el ZIP de la 2.0.0 salia sin `docker/` ni `.github/`
+  (50 entradas de 62). Ahora se usa `git archive`, que empaqueta exactamente los
+  ficheros versionados y no puede olvidarse de nada.
+
 ## [2.0.0] - 2026-11-24
 
 Consolidación de las correcciones probadas en producción y de las mejoras de
