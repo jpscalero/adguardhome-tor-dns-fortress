@@ -52,6 +52,15 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ### Corregido
 
+- **Fuga de módulos al forzar un perfil de edición**: `-Edition Enterprise` en
+  un equipo Pro activaba el informe Enterprise, y en Home podía activar el
+  registro de firewall, el registro DNS Client y ese mismo informe, porque esos
+  módulos declaraban `Available = $true` y solo miraban el tier solicitado.
+  Ahora la edición real recorta siempre el perfil pedido (`Tier` nunca supera
+  `DetectedTier`) y cada módulo comprueba además el tier detectado, así que un
+  equipo Home no ejecuta nada de Pro, Pro nada de Education y ninguno de los
+  dos el informe Enterprise. El perfil forzado por encima de la edición se
+  muestra como `(forzado, limitado a …)` con un aviso visible.
 - **Acentos y símbolos corruptos en la consola**: Windows PowerShell 5.1
   escribía con la página de códigos OEM y la suite mostraba `T?nel`,
   `Resoluci?n` y `???` en el encabezado. El nuevo helper

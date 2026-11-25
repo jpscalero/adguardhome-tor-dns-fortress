@@ -98,6 +98,10 @@ El instalador detecta la edición real del sistema y adapta el hardening:
 | **Education** | Educación | Todo lo de Pro más AppLocker, Credential Guard y Application Guard en lectura. |
 | **Enterprise** | Empresa | Todo lo de Education más el informe consolidado `edition-hardening.report.json`. |
 
+La edición real manda: un equipo Home no puede ejecutar módulos de Pro,
+Education o Enterprise, y Pro no puede ejecutar los de Education/Enterprise, ni
+siquiera forzando `-Edition` a mano (el perfil se recorta y se avisa).
+
 **¿Funciona por Ethernet?** Sí. El instalador configura todos los adaptadores
 físicos activos, incluido Ethernet; el firewall bloquea por puerto (no por
 interfaz) y AdGuard/Tor escuchan en loopback. Solo hay que revisar casos

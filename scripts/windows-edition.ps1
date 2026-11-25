@@ -62,8 +62,11 @@ function New-FortressModuleEntry {
         [string]$Description
     )
 
+    $detectedTier = [int]$script:FortressDetectedTier
+    $editionSupportsTier = ($detectedTier -ge $MinTier)
+
     $reason = ''
-    if (-not $Available) {
+    if ((-not $Available) -or (-not $editionSupportsTier)) {
         $reason = 'No disponible en esta edicion de Windows'
     } elseif ($script:FortressEffectiveTier -lt $MinTier) {
         $reason = ('Requiere perfil {0} o superior' -f (Get-FortressTierName -Tier $MinTier))
@@ -74,7 +77,7 @@ function New-FortressModuleEntry {
         Name        = $Name
         MinTier     = $MinTier
         Available   = [bool]$Available
-        Enabled     = ([bool]$Available -and ($script:FortressEffectiveTier -ge $MinTier))
+        Enabled     = ([bool]$Available -and $editionSupportsTier -and ($script:FortressEffectiveTier -ge $MinTier))
         Description = $Description
         Reason      = $reason
     }
@@ -142,12 +145,18 @@ function Get-WindowsFortressProfile {
     }
 
     $detectedTier = if ($isEnterprise) { 4 } elseif ($isEducation) { 3 } elseif ($isPro) { 2 } else { 1 }
-    $effectiveTier = $detectedTier
+    $requestedTier = $detectedTier
     $forced = ($Edition -ne 'Auto')
     if ($forced) {
-        $effectiveTier = Get-FortressTierId -Name $Edition
-        if ($effectiveTier -le 0) { $effectiveTier = 1 }
+        $requestedTier = Get-FortressTierId -Name $Edition
+        if ($requestedTier -le 0) { $requestedTier = 1 }
     }
+
+    # La edicion real manda: forzar un perfil nunca supera el tier detectado, de
+    # modo que Home no ejecuta modulos de Pro y Pro no ejecuta los de
+    # Education/Enterprise. Forzar un perfil inferior si recorta de verdad.
+    $effectiveTier = [Math]::Min($requestedTier, $detectedTier)
+    $forcedCapped = ($requestedTier -gt $detectedTier)
 
     $editionName = if ($isServer) { 'Server' }
         elseif ($isEnterprise -and $id -like '*iot*') { 'IoT Enterprise' }
@@ -162,6 +171,9 @@ function Get-WindowsFortressProfile {
 
     if ($forced) {
         $editionName = ('{0} (forzado)' -f $Edition)
+        if ($forcedCapped) {
+            $editionName = ('{0} (forzado, limitado a {1})' -f $Edition, (Get-FortressTierName -Tier $effectiveTier))
+        }
     }
 
     $windowsName = if ($build -ge 22000) { 'Windows 11' } elseif ($build -ge 10240) { 'Windows 10' } else { 'Windows' }
@@ -204,10 +216,11 @@ function Get-WindowsFortressProfile {
     }
 
     $script:FortressEffectiveTier = $effectiveTier
+    $script:FortressDetectedTier = $detectedTier
     $modules = @(
         New-FortressModuleEntry 'Core' 'Nucleo DNS/Tor/firewall/failsafe/watchdog' 1 $true 'AdGuard Home, Tor SOCKS5, DoH, DNSPort .onion, firewall anti-fuga, failsafe, watchdog, DoH del navegador y ACL del .env.'
-        New-FortressModuleEntry 'FirewallLogging' 'Registro de firewall' 2 $true 'Activa el registro de paquetes bloqueados en los perfiles Domain/Private/Public.'
-        New-FortressModuleEntry 'DnsClientLog' 'Registro operativo DNS Client' 2 $true 'Activa el canal Microsoft-Windows-DNS-Client/Operational para diagnostico.'
+        New-FortressModuleEntry 'FirewallLogging' 'Registro de firewall' 2 ($detectedTier -ge 2) 'Activa el registro de paquetes bloqueados en los perfiles Domain/Private/Public.'
+        New-FortressModuleEntry 'DnsClientLog' 'Registro operativo DNS Client' 2 ($detectedTier -ge 2) 'Activa el canal Microsoft-Windows-DNS-Client/Operational para diagnostico.'
         New-FortressModuleEntry 'DefenderAudit' 'Defender ASR/NP/CFA en auditoria' 2 ([bool]$supports.DefenderAsr) 'Activa reglas ASR, Network Protection y Controlled Folder Access en modo auditoria, sin bloquear.'
         New-FortressModuleEntry 'AppControlReadiness' 'App Control/WDAC (solo lectura)' 2 ([bool]$supports.AppControl) 'Comprueba si hay politicas App Control/WDAC activas; no las modifica.'
         New-FortressModuleEntry 'BitLockerReadiness' 'BitLocker (solo lectura)' 2 ([bool]$supports.BitLocker) 'Comprueba el estado de BitLocker; no activa cifrado ni genera claves.'
@@ -215,9 +228,10 @@ function Get-WindowsFortressProfile {
         New-FortressModuleEntry 'AppLockerReadiness' 'AppLocker (solo lectura)' 3 ([bool]$supports.AppLocker) 'Comprueba el servicio y las politicas AppLocker; no bloquea aplicaciones.'
         New-FortressModuleEntry 'CredentialGuardReadiness' 'Credential Guard (solo lectura)' 3 ([bool]$supports.CredentialGuard) 'Comprueba VBS/Credential Guard; no cambia la configuracion de arranque.'
         New-FortressModuleEntry 'AppGuardReadiness' 'Defender Application Guard (solo lectura)' 3 ([bool]$supports.AppGuard) 'Comprueba si la caracteristica Application Guard esta instalada; no la activa.'
-        New-FortressModuleEntry 'EnterpriseReport' 'Informe Enterprise' 4 $true 'Genera edition-hardening.report.json con el estado de todos los modulos y lecturas.'
+        New-FortressModuleEntry 'EnterpriseReport' 'Informe Enterprise' 4 ($detectedTier -ge 4) 'Genera edition-hardening.report.json con el estado de todos los modulos y lecturas.'
     )
     $script:FortressEffectiveTier = 0
+    $script:FortressDetectedTier = 0
 
     $enabled = @($modules | Where-Object { $_.Enabled })
     $disabled = @($modules | Where-Object { -not $_.Enabled })
@@ -255,9 +269,11 @@ function Get-WindowsFortressProfile {
         IsUnknown          = $isUnknown
         SupportedOS        = $supportedOS
         DetectedTier       = $detectedTier
+        RequestedTier      = $requestedTier
         Tier               = $effectiveTier
         TierName           = (Get-FortressTierName -Tier $effectiveTier)
         Forced             = $forced
+        ForcedCapped       = $forcedCapped
         Supports           = [pscustomobject]$supports
         Modules            = $modules
         EnabledModules     = @($enabled | ForEach-Object { $_.Id })
@@ -276,6 +292,9 @@ function Show-WindowsFortressProfile {
     Write-Host ''
     Write-Host '--- PERFIL DE WINDOWS ---' -ForegroundColor Cyan
     Write-Host ('  {0}' -f $WindowsProfile.Summary)
+    if ($WindowsProfile.PSObject.Properties['ForcedCapped'] -and $WindowsProfile.ForcedCapped) {
+        Write-Host ('  AVISO: el perfil solicitado no existe en esta edicion; se aplica como maximo {0}.' -f $WindowsProfile.TierName) -ForegroundColor Yellow
+    }
     Write-Host ('  Capacidades: {0}' -f $WindowsProfile.CapabilitySummary)
     Write-Host ('  Modulos activos: {0}' -f (($WindowsProfile.EnabledModules -join ', ')))
     if ($WindowsProfile.DisabledModules.Count -gt 0) {

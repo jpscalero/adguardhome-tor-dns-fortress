@@ -59,6 +59,28 @@ Forzar **no inventa capacidades**: si un Windows Home se fuerza a Enterprise, lo
 módulos que Home no soporta se siguen omitiendo. El perfil forzado solo decide
 qué módulos disponibles se intentan.
 
+Además, un perfil solicitado **nunca supera la edición real**: el `Tier` efectivo
+se recorta al tier detectado y el perfil aparece como `Enterprise (forzado,
+limitado a Avanzado)`. Así cada equipo bloquea los perfiles que no le
+corresponden, incluso si se le pasa el modificador a mano:
+
+| Edición real | Perfiles que puede ejecutar | Perfiles que se recortan |
+|---|---|---|
+| Home | Home (Básico) | Pro, Education y Enterprise |
+| Pro | Home y Pro (hasta Avanzado) | Education y Enterprise |
+| Education | Home, Pro y Education (hasta Educación) | Enterprise |
+| Enterprise | Todos (hasta Empresa) | — |
+
+Para comprobarlo sin cambiar nada:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\apply-edition-hardening.ps1 -Edition Enterprise -DryRun
+```
+
+En un equipo Home, Pro o Education la salida mostrará `EnterpriseReport: No
+disponible en esta edicion de Windows` y `Tier` recortado en la cabecera del
+perfil.
+
 ---
 
 ## 2. Matriz de módulos
