@@ -55,6 +55,9 @@ param(
     [switch]$Force
 )
 
+$consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
+if (Test-Path $consoleHelper) { . $consoleHelper }
+
 $ErrorActionPreference = 'Stop'
 
 function Write-Step {

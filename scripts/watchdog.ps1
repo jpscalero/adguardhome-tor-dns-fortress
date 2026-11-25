@@ -18,6 +18,9 @@ param(
     [int]$CheckIntervalSeconds = 30
 )
 
+$consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
+if (Test-Path $consoleHelper) { . $consoleHelper }
+
 $logFile = Join-Path $AdGuardDir "watchdog.log"
 $heartbeatFile = Join-Path $AdGuardDir "watchdog.heartbeat"
 $maxLogBytes = 2 * 1024 * 1024 # 2MB

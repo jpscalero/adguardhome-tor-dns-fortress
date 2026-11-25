@@ -4,6 +4,9 @@
 # Author: jpscalero
 # ==============================================================================
 
+$consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
+if (Test-Path $consoleHelper) { . $consoleHelper }
+
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "   🛡️ FORTRESS HEALTH & SECURITY DIAGNOSTIC SUITE        " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan

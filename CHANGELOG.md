@@ -52,6 +52,13 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ### Corregido
 
+- **Acentos y símbolos corruptos en la consola**: Windows PowerShell 5.1
+  escribía con la página de códigos OEM y la suite mostraba `T?nel`,
+  `Resoluci?n` y `???` en el encabezado. El nuevo helper
+  `scripts/console-utf8.ps1` fija la salida UTF-8 del proceso y se carga desde
+  todos los scripts, así que `COMPROBAR.cmd` y las ejecuciones directas ya
+  muestran acentos y el escudo correctamente, sin tocar la configuración del
+  sistema.
 - **Comprobación de administrador en los `.cmd`**: se usa `fltmc filters` en
   lugar de `net session`, que no es fiable en Windows Home.
 - **BOM UTF-8 en los scripts PowerShell**: se añadió la cabecera a los cinco

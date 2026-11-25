@@ -21,6 +21,9 @@ param(
 )
 
 # Ensure script is running as Administrator
+$consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
+if (Test-Path $consoleHelper) { . $consoleHelper }
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Error "Este script requiere privilegios de Administrador. Por favor, ejecútalo como Administrador."

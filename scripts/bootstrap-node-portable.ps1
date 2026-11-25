@@ -28,6 +28,9 @@ param(
     [string]$TargetDir = ''
 )
 
+$consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
+if (Test-Path $consoleHelper) { . $consoleHelper }
+
 $ErrorActionPreference = 'Stop'
 
 if (-not $TargetDir) {

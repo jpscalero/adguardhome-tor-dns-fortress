@@ -28,6 +28,9 @@
     programas por una politica mal aplicada.
 #>
 
+$consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
+if (Test-Path $consoleHelper) { . $consoleHelper }
+
 function Get-FortressTierName {
     param([int]$Tier)
     switch ($Tier) {
