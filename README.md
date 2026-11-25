@@ -10,6 +10,14 @@
 > **Arquitectura de Máxima Privacidad y Evasión Anti-Censura para Windows 11 / 10:**  
 > Servidor DNS local **AdGuard Home** ultra-blindado, canalizado al 100% a través de **Tor SOCKS5**, con evasión **GoodbyeDPI**, centinela **IA en tiempo real**, **generador de tráfico señuelo** y **watchdog autorreparable**.
 
+> [!TIP]
+> 🔰 **¿Nunca has usado GitHub ni PowerShell?**
+>
+> Sigue la **[Guía de instalación fácil para principiantes](docs/INSTALACION-FACIL.md)**.
+> Te dice qué descargar, dónde descomprimirlo y qué botón pulsar en cada
+> momento; al final solo tienes que hacer doble clic en `INSTALAR.cmd`. No hace
+> falta saber programar.
+
 ---
 
 ## 🏛️ Diagrama de Arquitectura
@@ -49,8 +57,8 @@ flowchart TD
         OnionDNS["🧅 Tor DNS Resolver (127.0.0.1:5350)"]
     end
 
-    subgraph Internet ["🌍 Red Neutral Externa (DNS-over-HTTPS)"]
-        Resolvers["🔒 Resolutores DoH en Jurisdicciones Neutrales<br/>• Digitale Gesellschaft (Suiza 🇨🇭)<br/>• Applied Privacy (Austria 🇦🇹)<br/>• Mullvad Zero-Logs (Suecia 🇸🇪)<br/>• DNS.SB (Alemania 🇩🇪)<br/>• Quad9 Foundation (Suiza 🇨🇭)"]
+    subgraph Internet ["🌍 Red Externa (DNS-over-HTTPS)"]
+        Resolvers["🔒 Resolutores DoH en paralelo (vía Tor)<br/>• Quad9 (Suiza 🇨🇭)<br/>• Cloudflare<br/>• AdGuard DNS<br/>• Alternativas: Digitale Gesellschaft, Applied Privacy, Mullvad, DNS.SB"]
         OnionNet["🧅 Red Tor (.onion Hidden Services)"]
     end
 
@@ -68,17 +76,54 @@ flowchart TD
 | Módulo | Función y Beneficio |
 | :--- | :--- |
 | **🧅 Túnel Tor SOCKS5 Integral** | Todas las peticiones DoH viajan a través de 3 saltos cifrados por la red Tor. Tu ISP jamás ve a qué servidores DNS consultas ni los dominios que visitas. |
-| **🌍 Resolutores DoH Multijurisdicción** | Consultas paralelas de carrera (`parallel mode`) a Suiza (Digitale Gesellschaft, Quad9), Austria (Applied Privacy), Suecia (Mullvad) y Alemania (DNS.SB). |
+| **🌍 Resolutores DoH en paralelo** | Consultas de carrera (`parallel mode`) a Quad9 (Suiza), Cloudflare y AdGuard DNS, con alternativas multijurisdiccionales documentadas (Digitale Gesellschaft, Applied Privacy, Mullvad, DNS.SB). |
 | **⚡ Caché Optimista de Alta Velocidad** | 32 MB de RAM para más de 100.000 dominios. Respuestas instantáneas en 0 ms para dominios recurrentes, refrescando en segundo plano sin latencia de usuario. |
 | **🛡️ Evasión de DPI (GoodbyeDPI)** | Segmentación a nivel de kernel de paquetes TCP y ofuscación de SNI para eludir firewalls gubernamentales, inspección profunda del ISP y censura. |
 | **🛠️ Solución Nativa Puerto 53 Windows 11** | Incluye el script de arbitraje que neutraliza el secuestro de `0.0.0.0:53 UDP` por el servicio `SharedAccess` (ICS / Hyper-V Default Switch). |
 | **🤖 Centinela AI en Tiempo Real** | Script Node.js que analiza el query log en vivo, calcula entropía de Shannon (detección de malware DGA) y vigila balizas C2 periódicas. |
 | **🎲 Generador de Tráfico Señuelo (Decoy)** | Inyecta ruido estadístico y consultas aleatorias con jitter a sitios neutrales y académicos para romper el perfilado de hábitos de navegación. |
 | **🐕 Watchdog Autorreparable** | Servicio supervisor en segundo plano que vigila el estado de Tor, AdGuard Home y GoodbyeDPI, reiniciándolos automáticamente ante fallos. |
+| **🪟 Perfiles por edición de Windows** | Detecta Home, Pro, Education o Enterprise y aplica solo el hardening que esa edición soporta, sin romper el núcleo DNS/Tor. |
+
+---
+
+## 🪟 Compatibilidad por edición de Windows y Ethernet
+
+El instalador detecta la edición real del sistema y adapta el hardening:
+
+| Edición | Perfil | Qué añade sobre el núcleo |
+|---|---|---|
+| **Home** | Básico | Solo el núcleo DNS/Tor/firewall/failsafe/watchdog. |
+| **Pro** | Avanzado | Registro de firewall, registro DNS Client, auditoría Defender (ASR/NP/CFA), App Control, BitLocker e Hyper-V/Sandbox en lectura. |
+| **Education** | Educación | Todo lo de Pro más AppLocker, Credential Guard y Application Guard en lectura. |
+| **Enterprise** | Empresa | Todo lo de Education más el informe consolidado `edition-hardening.report.json`. |
+
+**¿Funciona por Ethernet?** Sí. El instalador configura todos los adaptadores
+físicos activos, incluido Ethernet; el firewall bloquea por puerto (no por
+interfaz) y AdGuard/Tor escuchan en loopback. Solo hay que revisar casos
+especiales como adaptadores virtuales, redes IPv6-only, portales cautivos o
+VPN que cambien el DNS. La matriz completa, los comandos de comprobación y esos
+casos están en **[docs/EDICIONES-WINDOWS.md](docs/EDICIONES-WINDOWS.md)**.
 
 ---
 
 ## 🚀 Despliegue Rápido (1-Click)
+
+> 🔰 **¿Es tu primera vez?** Usa la **[Guía de instalación fácil](docs/INSTALACION-FACIL.md)**.
+> Descarga el ZIP del repositorio, descomprímelo en `C:\fortaleza` y haz doble
+> clic en `INSTALAR.cmd`. La guía explica también cómo instalar AdGuard Home,
+> Tor y GoodbyeDPI paso a paso.
+
+### Instalación fácil (Windows, sin consola)
+
+1. Descarga el repositorio con **Code → Download ZIP** y descomprímelo en
+   `C:\fortaleza`.
+2. Instala AdGuard Home y completa su asistente (crea tu usuario y contraseña).
+3. Descomprime Tor en `C:\Tor` y, opcionalmente, GoodbyeDPI en `C:\GoodbyeDPI`.
+4. Haz doble clic en `INSTALAR.cmd` y sigue las instrucciones.
+
+Para comprobar el estado en cualquier momento, doble clic en `COMPROBAR.cmd`.
+Para deshacer los cambios, doble clic en `DESINSTALAR.cmd`.
 
 ### Prerrequisitos
 1. **Windows 11 o 10 (64-bit)** con PowerShell 5.1 o PowerShell 7+.
@@ -88,6 +133,11 @@ flowchart TD
 5. [Node.js](https://nodejs.org/) (opcional pero recomendado para el Centinela AI y el Tráfico Señuelo).
 
 ### Instalación Automatizada
+
+> **En un equipo nuevo**, usa `INSTALAR.cmd` (o la guía fácil): este instalador
+> avanzado asume que AdGuard Home ya tiene un administrador creado en su
+> asistente y no genera el hash de la contraseña por sí solo.
+
 Abre una consola de PowerShell como **Administrador** y ejecuta:
 
 ```powershell
@@ -102,8 +152,9 @@ powershell.exe -ExecutionPolicy Bypass -File scripts\install_fortress.ps1
 El instalador:
 * Neutraliza el secuestro del puerto 53 en Windows 11.
 * Asigna AdGuard Home exclusivamente a `127.0.0.1:53` y `::1:53`.
-* Copia la plantilla de configuración blindada `AdGuardHome.template.yaml`.
-* Configura los adaptadores de red de Windows hacia `127.0.0.1`.
+* Copia la plantilla de configuración blindada `AdGuardHome.template.yaml` si no existe una configuración previa.
+* Configura los adaptadores de red de Windows hacia `127.0.0.1`, incluido Ethernet.
+* Detecta Windows Home/Pro/Education/Enterprise y aplica el hardening que permite cada edición.
 * Registra la tarea programada del Watchdog autorreparable.
 * Ejecuta la suite de verificación de diagnóstico.
 
@@ -123,8 +174,11 @@ Salida esperada:
    🛡️ FORTRESS HEALTH & SECURITY DIAGNOSTIC SUITE        
 ==========================================================
 
+   Windows: Windows 11 Pro 24H2 (build 26100) | Professional | Tier 2 - Avanzado
+   Hardening de edicion: 7 modulo(s), 0 aviso(s)
+
 [1] Puerto 53 UDP vinculado exclusivamente a AdGuard Home... OK
-[2] Túnel Tor SOCKS5 en escucha (127.0.0.1:9050)... OK
+[2] Túnel Tor SOCKS5 en escucha y salida anónima (127.0.0.1:9050)... OK
 [3] Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)... OK
 [4] Resolución DNS local en 127.0.0.1:53 (github.com)... (159ms) OK
 [5] Resolución nativa de dominios Tor .onion (Virtual IP 10.x.x.x)... OK
@@ -133,9 +187,16 @@ Salida esperada:
 [8] Centinela AI de detección DGA/C2 (ai_dns_guard.js)... OK
 [9] Generador de tráfico señuelo anti-fingerprinting (decoy_dns.js)... OK
 [10] Neutralización de secuestro de puerto 53 (SharedAccess/ICS)... OK
+[11] Permisos de config\.env restringidos (sin Usuarios/AppContainer)... OK
+[12] Reglas anti-fuga DoT 853 y mDNS 5353 activas... OK
+[13] Heartbeat del watchdog reciente (< 120 s)... OK
+[14] Tarea programada del failsafe registrada... OK
+[15] DoH del navegador desactivado por politica (Chrome/Edge)... OK
+[16] Integridad del binario de AdGuardHome (hash registrado)... OK
+[17] DNS real de Windows apunta a la fortaleza (127.0.0.1)... OK
 
 ==========================================================
-   ✅ TODAS LAS PRUEBAS SUPERADAS (10/10): FORTALEZA ACTIVA
+   ✅ TODAS LAS PRUEBAS SUPERADAS (17/17): FORTALEZA 100% ACTIVA
 ==========================================================
 ```
 
@@ -168,6 +229,8 @@ adguardhome-tor-dns-fortress/
 │   ├── install_fortress.ps1         # Instalador automatizado para Windows 11/10
 │   ├── test_fortress.ps1            # Suite de comprobación de salud y diagnósticos
 │   ├── watchdog.ps1                 # Watchdog de supervisión y autorrecuperación
+│   ├── windows-edition.ps1          # Detección de Home/Pro/Education/Enterprise
+│   ├── apply-edition-hardening.ps1  # Hardening reversible según la edición
 │   ├── ai_dns_guard.js              # Centinela AI de detección de amenazas y DGA
 │   └── decoy_dns.js                 # Generador de tráfico señuelo y ofuscación
 ├── launchers/
@@ -176,6 +239,7 @@ adguardhome-tor-dns-fortress/
 │   └── start_decoy.vbs              # Lanzador silencioso para Tráfico Señuelo
 ├── docs/
 │   ├── ARCHITECTURE.md              # Documentación técnica y modelo de amenazas
+│   ├── EDICIONES-WINDOWS.md         # Matriz por edición y funcionamiento por Ethernet
 │   └── WINDOWS_PORT_53_FIX.md       # Explicación a fondo del fix para SharedAccess
 ├── tools/                           # Scripts utilitarios para migración y hardening avanzado
 │   ├── build_master_fortress.js     # Constructor de configuración unificada
@@ -227,7 +291,7 @@ Toda la documentación técnica exhaustiva está disponible en la **[Wiki Oficia
 |---|---|---|
 | 1. Profesionalización | CI real (PowerShell, Node, config, secretos, docs), plantillas de issues y PR, `NOTICE`, `docs/LIMITS.md` | ✅ |
 | 2. Correcciones de producción | Failsafe de red, ACL de `config/.env`, Node portable con SHA256, lanzadores `.cmd`/`.vbs` y watchdog sin bucles | ✅ |
-| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 16 pruebas | ✅ |
+| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 17 pruebas | ✅ |
 | 4. Operación | Desinstalador con rollback, tests sin red, `-DryRun` en el instalador, perfil Docker/Linux | ✅ |
 
 ## 🔒 Privacidad del centinela: AI_MODE
@@ -266,6 +330,8 @@ python tools/validate_fortress_config.py
 
 | Documento | Contenido |
 |---|---|
+| [docs/INSTALACION-FACIL.md](docs/INSTALACION-FACIL.md) | Instalación desde cero para principiantes |
+| [docs/EDICIONES-WINDOWS.md](docs/EDICIONES-WINDOWS.md) | Home/Pro/Education/Enterprise, módulos y Ethernet |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Diseño y flujo de datos |
 | [docs/LIMITS.md](docs/LIMITS.md) | Qué NO protege la fortaleza |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | Modelo de amenazas |

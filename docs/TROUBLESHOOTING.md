@@ -82,7 +82,7 @@ Tienen su propio DoH. Aplica la política y comprueba en `chrome://policy`:
 powershell -ExecutionPolicy Bypass -File scripts\harden-browser-doh.ps1
 ```
 
-## La suite dice FAILED en el check del decoy
+## La suite dice AVISO en el check del decoy
 
 Si el decoy lo lanzó SYSTEM, su línea de comandos no es legible sin elevación. Es
 un **aviso**, no un fallo real: ejecuta la suite como administrador.

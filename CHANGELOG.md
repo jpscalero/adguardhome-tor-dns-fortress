@@ -4,6 +4,68 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/), y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Añadido
+
+- **Instalación para principiantes (`docs/INSTALACION-FACIL.md`)**: guía paso a
+  paso para quien nunca ha usado GitHub, PowerShell ni Tor, con enlaces de
+  descarga, avisos de SmartScreen y solución de problemas básicos.
+- **Instalador de doble clic (`INSTALAR.cmd`)**: se eleva solo, prepara el
+  usuario creado en el asistente de AdGuard Home, genera `config\.env`,
+  descarga Node portable si falta, aplica la configuración y arranca los
+  servicios. Incluye `COMPROBAR.cmd` y `DESINSTALAR.cmd` para el día a día.
+- **Preparación de credenciales (`scripts/preparar-config-inicial.ps1`)**: toma
+  el hash bcrypt que crea el asistente de AdGuard Home y lo inyecta en la
+  plantilla endurecida, sin pedir al usuario que edite YAML ni genere hashes.
+- **Servicios automáticos (`scripts/instalar-servicios.ps1`)**: registra y
+  arranca AdGuard Home, Tor y, si está disponible, GoodbyeDPI. Si GoodbyeDPI
+  falta, avisa y continúa.
+- **Perfiles por edición de Windows (`scripts/windows-edition.ps1`)**: detecta
+  Home, Pro, Pro for Workstations, Pro Education, Education, Enterprise, LTSC,
+  IoT y Server; asigna un tier y decide qué módulos de hardening se aplican.
+- **Hardening por edición (`scripts/apply-edition-hardening.ps1`)**: aplica
+  registro de firewall, registro DNS Client y auditoría de Defender (ASR/NP/CFA)
+  en Pro o superior; comprueba AppLocker, App Control, Credential Guard,
+  BitLocker, Hyper-V/Sandbox y Application Guard sin activarlos; genera
+  `edition-hardening.report.json` y guarda el estado reversible en
+  `edition-hardening.state.json`. Admite `-DryRun`, `-Undo` y `-Edition`.
+- **Documentación de ediciones (`docs/EDICIONES-WINDOWS.md`)**: matriz completa
+  por edición, explicación de Ethernet y casos especiales (IPv6-only, portales
+  cautivos, VPN, adaptadores virtuales).
+
+### Cambiado
+
+- **`install_fortress.ps1`**: nuevos modificadores `-EditionProfile` y
+  `-SkipEditionHardening`; el instalador muestra el perfil detectado, copia los
+  scripts de edición y aplica el hardening correspondiente después del DoH de
+  los navegadores.
+- **`install_fortress.ps1`**: nuevo modificador `-SkipDiagnostics` para que el
+  instalador fácil ejecute la comprobación final después de arrancar los
+  servicios, en lugar de antes.
+- **Suite de diagnóstico (`scripts/test_fortress.ps1`)**: muestra el perfil de
+  Windows y el resumen del hardening de edición sin alterar las comprobaciones
+  existentes; añade la comprobación 17, que verifica que el DNS IPv4 real de
+  Windows apunta a `127.0.0.1` en los adaptadores físicos activos.
+- **Desinstalador (`scripts/uninstall_fortress.ps1`)**: revierte el hardening de
+  edición con `apply-edition-hardening.ps1 -Undo` antes de eliminar datos.
+
+### Corregido
+
+- **Comprobación de administrador en los `.cmd`**: se usa `fltmc filters` en
+  lugar de `net session`, que no es fiable en Windows Home.
+- **BOM UTF-8 en los scripts PowerShell**: se añadió la cabecera a los cinco
+  scripts que no la tenían y el CI ahora la verifica en cada ejecución.
+- **DoH de Firefox (`harden-browser-doh.ps1`)**: el `policies.json` se escribe
+  sin BOM, se conserva una copia `.fortress-bak` antes de modificarlo y `-Undo`
+  restaura esa copia o elimina solo `DNSOverHTTPS`, sin borrar otras políticas.
+- **Servicios (`instalar-servicios.ps1`)**: AdGuard Home se instala desde su
+  propia carpeta y el script ya no falla si Tor, AdGuard o GoodbyeDPI estaban
+  arrancados; se puede repetir con seguridad.
+- **Documentación**: la salida de ejemplo del README refleja las 16
+  comprobaciones reales, la descripción de resolutores coincide con la
+  plantilla y el aviso del decoy se documenta como `AVISO`, no como `FAILED`.
+
 ## [2.0.1] - 2026-11-24
 
 ### Corregido

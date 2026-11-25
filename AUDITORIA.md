@@ -9,7 +9,7 @@ Todos los hallazgos críticos (C1 a C7) y de mejora (M1 a M20) han sido completa
 ## 🔴 CRÍTICOS (rompen la instalación o la seguridad)
 
 ### C1. `install_fortress.ps1` no se puede ejecutar — sin BOM, PowerShell 5.1 lo rompe — `[CORREGIDO]`
-- **Solución implementada:** Se convirtieron todos los scripts PowerShell (`scripts/install_fortress.ps1`, `scripts/watchdog.ps1`, `scripts/test_fortress.ps1`) al formato **UTF-8 con BOM** (`0xEF, 0xBB, 0xBF`). Se añadió además un job `bom-check` en GitHub Actions que valida automáticamente la presencia de la cabecera en cada commit.
+- **Solución implementada:** Se convirtieron todos los scripts PowerShell (`scripts/install_fortress.ps1`, `scripts/watchdog.ps1`, `scripts/test_fortress.ps1`) al formato **UTF-8 con BOM** (`0xEF, 0xBB, 0xBF`). Se añadió además un paso `bom-check` dentro del job `scripts` de GitHub Actions que valida automáticamente la presencia de la cabecera en cada commit.
 - **Verificación:** `[System.Management.Automation.Language.Parser]::ParseFile()` ejecutado con éxito bajo PowerShell 5.1 y PS 7 sin advertencias ni errores (0 errores).
 
 ### C2. La plantilla maestra promete Tor pero el DNS no pasa por Tor — `[CORREGIDO]`
@@ -103,3 +103,28 @@ Todos los hallazgos críticos (C1 a C7) y de mejora (M1 a M20) han sido completa
 
 ### M20. El `test_fortress.ps1` no mide la latencia real a través de Tor — `[CORREGIDO]`
 - **Solución implementada:** Se integró en la comprobación 2 de `scripts/test_fortress.ps1` una prueba activa contra el endpoint `https://check.torproject.org/api/ip` a través de SOCKS5, verificando en tiempo real que la consulta es atendida por un nodo de salida oficial de Tor (`IsTor: true`).
+
+
+## Anexo — Hardening por edición de Windows (2026-11-25)
+
+- **Objetivo:** adaptar el hardening nativo a Windows Home, Pro, Education y
+  Enterprise sin duplicar ni debilitar el núcleo DNS/Tor.
+- **Diseño:** `scripts/windows-edition.ps1` detecta la edición real por registro
+  y calcula un tier; `scripts/apply-edition-hardening.ps1` aplica solo los
+  módulos permitidos y guarda el estado original para revertirlos.
+- **Controles de seguridad:** AppLocker, App Control/WDAC, Credential Guard,
+  BitLocker, Hyper-V/Sandbox y Application Guard son de **solo lectura**. No se
+  bloquean aplicaciones ni se activan características que puedan dejar el equipo
+  sin arrancar. Defender se configura en modo auditoría, nunca en bloqueo.
+- **Reversibilidad:** firewall, registro DNS Client y preferencias de Defender
+  se restauran con `-Undo`; el desinstalador lo ejecuta automáticamente. El
+  estado se conserva si una reversión falla para poder reintentarla.
+- **Verificación local:** los perfiles Home, Pro, Education y Enterprise se
+  probaron en modo `-DryRun`; en Windows 11 Pro se aplicó y revirtió el perfil
+  Pro y el perfil Enterprise forzado, comprobando que firewall, registro DNS,
+  Network Protection, Controlled Folder Access y las reglas ASR vuelven a su
+  valor original.
+- **Limitaciones:** en Home no hay módulos nativos que aplicar; en Education y
+  Enterprise las comprobaciones de AppLocker/Credential Guard dependen de que el
+  sistema tenga esas características. El hardening no sustituye una política
+  corporativa de Intune/GPO.

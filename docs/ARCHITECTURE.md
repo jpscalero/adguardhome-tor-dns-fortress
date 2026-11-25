@@ -35,8 +35,8 @@ flowchart TD
         OnionDNS["🧅 Tor DNS Resolver (127.0.0.1:5350)"]
     end
 
-    subgraph Internet ["🌍 Red Neutral Externa (DNS-over-HTTPS)"]
-        Resolvers["🔒 Resolutores DoH en Jurisdicciones Neutrales<br/>• Digitale Gesellschaft (Suiza 🇨🇭)<br/>• Applied Privacy (Austria 🇦🇹)<br/>• Mullvad Zero-Logs (Suecia 🇸🇪)<br/>• DNS.SB (Alemania 🇩🇪)<br/>• Quad9 Foundation (Suiza 🇨🇭)"]
+    subgraph Internet ["🌍 Red Externa (DNS-over-HTTPS)"]
+        Resolvers["🔒 Resolutores DoH en paralelo (vía Tor)<br/>• Quad9 (Suiza 🇨🇭)<br/>• Cloudflare<br/>• AdGuard DNS<br/>• Alternativas: Digitale Gesellschaft, Applied Privacy, Mullvad, DNS.SB"]
         OnionNet["🧅 Red Tor (.onion Hidden Services)"]
     end
 

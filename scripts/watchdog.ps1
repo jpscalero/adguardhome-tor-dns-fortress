@@ -163,7 +163,7 @@ while ($true) {
         # --------------------------------------------------------------------------
         try {
             $gdSvc = Get-Service -Name "GoodbyeDPI" -ErrorAction SilentlyContinue
-            if ((-not $gdSvc) -or ($gdSvc.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running)) {
+            if ($gdSvc -and ($gdSvc.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running)) {
                 Write-WatchdogLog "WARN" "GoodbyeDPI Service no esta en ejecucion. Iniciando..."
                 Start-Service -Name "GoodbyeDPI" -ErrorAction SilentlyContinue
             }
@@ -221,11 +221,13 @@ while ($true) {
             $cfgPath = Join-Path $AdGuardDir "AdGuardHome.yaml"
             if ($activeIp -and (Test-Path $cfgPath)) {
                 $cfg = Get-Content $cfgPath -Raw
-                if ($cfg -match "bind_hosts:\s*\r?\n\s*-\s*127\.0\.0\.1\s*\r?\n\s*-\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*\r?\n\s*-\s*::1") {
+                if ($cfg -match "bind_hosts:\s*\r?\n\s*-\s*'?127\.0\.0\.1'?\s*\r?\n\s*-\s*'?(\d{1,3}(?:\.\d{1,3}){3})'?\s*\r?\n\s*-\s*'?::1'?") {
                     $boundIp = $Matches[1]
+                    $bindBlock = $Matches[0]
                     if ($boundIp -ne $activeIp) {
                         Write-WatchdogLog "WARN" "Cambio de IP de red detectado ($boundIp -> $activeIp). Actualizando bind_hosts..."
-                        $cfg = $cfg.Replace($boundIp, $activeIp)
+                        $newBlock = $bindBlock.Replace($boundIp, $activeIp)
+                        $cfg = $cfg.Replace($bindBlock, $newBlock)
                         Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8 -Force
                         Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
                         Write-WatchdogLog "HEAL" "[AUTO-REPAIR] AdGuard Home reconfigurado y reiniciado con la nueva IP activa ($activeIp)."

@@ -13,7 +13,11 @@ param(
     [switch]$Force = $false,
     [switch]$DryRun = $false,
     [switch]$SkipEnvAcl = $false,
-    [switch]$SkipBrowserDoh = $false
+    [switch]$SkipBrowserDoh = $false,
+    [switch]$SkipDiagnostics = $false,
+    [ValidateSet('Auto', 'Home', 'Pro', 'Education', 'Enterprise')]
+    [string]$EditionProfile = 'Auto',
+    [switch]$SkipEditionHardening = $false
 )
 
 # Ensure script is running as Administrator
@@ -27,6 +31,17 @@ Write-Host "==========================================================" -Foregro
 Write-Host "   🚀 INSTALADOR AUTOMATIZADO - DNS PRIVACY FORTRESS     " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
+
+# Perfil de edicion: Home, Pro, Education o Enterprise.
+$fortressProfile = $null
+$editionScript = Join-Path $PSScriptRoot 'windows-edition.ps1'
+if (Test-Path $editionScript) {
+    . $editionScript
+    $fortressProfile = Get-WindowsFortressProfile -Edition $EditionProfile
+    Show-WindowsFortressProfile -WindowsProfile $fortressProfile
+} else {
+    Write-Warning "No se encontro windows-edition.ps1; se instalara solo el nucleo."
+}
 
 # -DryRun: muestra el plan completo y sale sin tocar nada.
 if ($DryRun) {
@@ -42,7 +57,13 @@ if ($DryRun) {
     Write-Host "  7. Registrar tareas: watchdog (boot) y failsafe (cada 2 min)"
     Write-Host "  8. Restringir la ACL de config\.env"
     Write-Host "  9. Desactivar el DoH propio de Chrome/Edge/Firefox"
-    Write-Host " 10. Ejecutar scripts/test_fortress.ps1"
+    Write-Host " 10. Aplicar el hardening adicional de la edicion Windows"
+    Write-Host " 11. Ejecutar scripts/test_fortress.ps1"
+    if ($fortressProfile) {
+        Write-Host ""
+        Write-Host ("  Perfil detectado: {0}" -f $fortressProfile.Summary) -ForegroundColor Cyan
+        Write-Host ("  Modulos de edicion: {0}" -f ($fortressProfile.EnabledModules -join ', ')) -ForegroundColor Cyan
+    }
     Write-Host ""
     Write-Host "Vuelve a ejecutarlo sin -DryRun para aplicar." -ForegroundColor Green
     exit 0
@@ -122,6 +143,8 @@ $scriptsToCopy = @(
     "failsafe-dns.ps1",
     "harden-env-acl.ps1",
     "harden-browser-doh.ps1",
+    "windows-edition.ps1",
+    "apply-edition-hardening.ps1",
     "ai_dns_guard.js",
     "decoy_dns.js",
     "test_fortress.ps1"
@@ -159,7 +182,7 @@ if (Test-Path $launchersDir) {
 
 # 4. Set Windows DNS Client to 127.0.0.1
 Write-Host "[4/6] Configurando adaptadores de red de Windows hacia 127.0.0.1..." -ForegroundColor Yellow
-$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' }
+$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*Loopback*' }
 foreach ($adapter in $adapters) {
     try {
         Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses @("127.0.0.1") -ErrorAction SilentlyContinue
@@ -229,12 +252,37 @@ if (-not $SkipBrowserDoh) {
     }
 }
 
+# 5.7. Hardening adicional segun la edicion de Windows
+if (-not $SkipEditionHardening) {
+    $editionHardening = Join-Path $TargetDir "apply-edition-hardening.ps1"
+    if (($fortressProfile) -and (Test-Path $editionHardening)) {
+        Write-Host ("[5.7/6] Aplicando hardening de la edicion {0}..." -f $fortressProfile.EditionName) -ForegroundColor Yellow
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $editionHardening -TargetDir $TargetDir -Edition $EditionProfile
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "  -> El hardening de edicion devolvio un aviso; el nucleo DNS/Tor sigue instalado."
+        }
+    } else {
+        Write-Host "  -> AVISO: no se encontro apply-edition-hardening.ps1; se omite el hardening adicional." -ForegroundColor Yellow
+    }
+}
+
 # 6. Final verification
-Write-Host "[6/6] Ejecutando comprobación de salud del sistema..." -ForegroundColor Yellow
-$diagScript = Join-Path $repoRoot "scripts\test_fortress.ps1"
-if (Test-Path $diagScript) {
-    & $diagScript
+if ($SkipDiagnostics) {
+    Write-Host "[6/6] Diagnóstico omitido (-SkipDiagnostics). Se ejecutará al final, con los servicios ya arrancados." -ForegroundColor Cyan
+} else {
+    Write-Host "[6/6] Ejecutando comprobación de salud del sistema..." -ForegroundColor Yellow
+    $diagScript = Join-Path $repoRoot "scripts\test_fortress.ps1"
+    if (Test-Path $diagScript) {
+        & $diagScript
+    }
 }
 
 Write-Host ""
-Write-Host "🎉 INSTALACIÓN COMPLETADA. Tu sistema ahora navega con privacidad total a través de la fortaleza DNS." -ForegroundColor Green
+if ($SkipDiagnostics) {
+    Write-Host "Configuración aplicada. El instalador fácil continúa con los servicios y la comprobación final." -ForegroundColor Green
+} else {
+    Write-Host "🎉 INSTALACIÓN COMPLETADA. Tu sistema ahora navega con privacidad total a través de la fortaleza DNS." -ForegroundColor Green
+}
+if ($fortressProfile) {
+    Write-Host ("Perfil Windows aplicado: {0}" -f $fortressProfile.Summary) -ForegroundColor Cyan
+}

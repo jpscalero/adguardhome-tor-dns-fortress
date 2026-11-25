@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# 🛡️ Fortress Verification & Health Diagnostics Suite (16-Point Audit)
+# 🛡️ Fortress Verification & Health Diagnostics Suite (17-Point Audit)
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # ==============================================================================
@@ -7,6 +7,28 @@
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "   🛡️ FORTRESS HEALTH & SECURITY DIAGNOSTIC SUITE        " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host ""
+
+# Perfil de edicion (informativo; no cambia el numero de comprobaciones).
+$editionInfo = $null
+$editionScript = Join-Path $PSScriptRoot 'windows-edition.ps1'
+if (Test-Path $editionScript) {
+    . $editionScript
+    $editionInfo = Get-WindowsFortressProfile
+    Write-Host ("   Windows: {0}" -f $editionInfo.Summary) -ForegroundColor DarkCyan
+    $fortressDir = if ($env:FORTRESS_DIR) { $env:FORTRESS_DIR } else { 'C:\AdGuardHome' }
+    $editionReport = Join-Path $fortressDir 'edition-hardening.report.json'
+    if (Test-Path $editionReport) {
+        try {
+            $reportData = Get-Content -Path $editionReport -Raw | ConvertFrom-Json
+            $editionApplied = @($reportData.Applied | Where-Object { $_ }).Count
+            $editionWarnings = @($reportData.Warnings | Where-Object { $_ }).Count
+            Write-Host ("   Hardening de edicion: {0} modulo(s), {1} aviso(s)" -f $editionApplied, $editionWarnings) -ForegroundColor DarkCyan
+        } catch { }
+    }
+} else {
+    Write-Host '   Windows: perfil de edicion no disponible (windows-edition.ps1 ausente).' -ForegroundColor DarkGray
+}
 Write-Host ""
 
 $passed = 0
@@ -241,6 +263,37 @@ Assert-Check "Integridad del binario de AdGuardHome (hash registrado)" {
     $expected = (Get-Content $hashFile -Raw).Trim()
     if ($expected -eq $current) { return $true }
     Write-Host " (el binario cambio desde el ultimo registro; revisa la actualizacion) " -NoNewline -ForegroundColor Yellow
+    return $false
+}
+
+# 17. DNS real de Windows (no solo la consulta explicita a 127.0.0.1)
+Assert-Check "DNS real de Windows apunta a la fortaleza (127.0.0.1)" {
+    $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object {
+        $_.Status -eq 'Up' -and
+        $_.InterfaceDescription -notlike '*Virtual*' -and
+        $_.InterfaceDescription -notlike '*Hyper-V*' -and
+        $_.InterfaceDescription -notlike '*Loopback*'
+    })
+    if ($adapters.Count -eq 0) {
+        Write-Host " (sin adaptadores fisicos activos) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+
+    $bad = @()
+    foreach ($adapter in $adapters) {
+        $dns = @(Get-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ServerAddresses | Where-Object { $_ })
+        if (($dns.Count -ne 1) -or ($dns[0] -ne '127.0.0.1')) {
+            $shown = if ($dns.Count -gt 0) { $dns -join ',' } else { 'automatico' }
+            $bad += ('{0}={1}' -f $adapter.Name, $shown)
+        }
+    }
+
+    if ($bad.Count -eq 0) {
+        Write-Host ('({0}) ' -f (($adapters | ForEach-Object { $_.Name }) -join ', ')) -NoNewline -ForegroundColor Gray
+        return $true
+    }
+
+    Write-Host ('(DNS real no apunta a la fortaleza: {0}) ' -f ($bad -join '; ')) -NoNewline -ForegroundColor Yellow
     return $false
 }
 

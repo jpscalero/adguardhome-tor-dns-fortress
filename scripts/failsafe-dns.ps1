@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Failsafe de red de la fortaleza DNS: evita quedarse sin Internet si AdGuard Home cae.
 
@@ -11,8 +11,10 @@
       - AdGuard NO responde -> MODO EMERGENCIA: apaga las reglas anti-fuga y pone
         DNS publico para no dejar el equipo sin resolucion.
 
-    Nunca pisa una configuracion DNS que no sea la de la fortaleza (por ejemplo,
-    un portatil que acaba de recibir DNS por DHCP en otra red).
+    Si AdGuard responde, restaura 127.0.0.1 en los adaptadores fisicos activos
+    aunque DHCP haya puesto un DNS publico: las reglas anti-fuga bloquean ese
+    DNS externo y dejarlo seria quedarse sin resolucion. En emergencia solo
+    cambia adaptadores que ya apuntaban a la fortaleza.
 
     Tapon de seguridad: la sonda es TCP al puerto 53 (no Resolve-DnsName, que da
     falsos negativos cuando solo falla un upstream y no el servidor local).
@@ -146,17 +148,20 @@ function Get-CurrentDns {
 }
 
 function Set-SystemDns {
-    param([string[]]$Servers)
+    param([string[]]$Servers, [switch]$ForceFortress)
     foreach ($alias in Get-TargetAdapters) {
         $current = Get-CurrentDns $alias
-        $isFortressDns = ($current.Count -gt 0 -and $current[0] -eq '127.0.0.1')
+        $isFortressDns = ($current.Count -eq 1 -and $current[0] -eq '127.0.0.1')
 
         if ($Servers -contains '127.0.0.1') {
-            # Restaurar fortaleza: solo si el adaptador ya apuntaba a loopback
-            # o no tiene DNS (recien conectado). Nunca secuestrar otra configuracion.
-            if (-not $isFortressDns -and $current.Count -gt 0) {
-                if ($Trace) { Write-FailsafeLog ("{0}: DNS {1} no es de la fortaleza; no se toca" -f $alias, ($current -join ',')) }
-                continue
+            if ($isFortressDns) { continue }
+            if ($current.Count -gt 0) {
+                if ($ForceFortress) {
+                    Write-FailsafeLog ("{0}: DNS {1} ajeno; AdGuard responde, adoptando 127.0.0.1" -f $alias, ($current -join ','))
+                } else {
+                    if ($Trace) { Write-FailsafeLog ("{0}: DNS {1} no es de la fortaleza; no se toca" -f $alias, ($current -join ',')) }
+                    continue
+                }
             }
         } else {
             # Emergencia: solo si estaba apuntando a la fortaleza.
@@ -209,11 +214,11 @@ if ($Trace) {
 if ($adguardUp) {
     if ($rulesState -ne 'on') {
         Write-FailsafeLog ("MODO FORTALEZA: AdGuard responde en 53 y las reglas estan {0}. Restaurando." -f $rulesState)
-        Set-SystemDns @('127.0.0.1')
         Set-FortressRules $true
-        if (-not $DryRun) { Clear-DnsClientCache }
-        Write-FailsafeLog 'MODO FORTALEZA restaurado (DNS 127.0.0.1 + reglas anti-fuga)'
+        Write-FailsafeLog 'MODO FORTALEZA restaurado (reglas anti-fuga)'
     }
+    Set-SystemDns -Servers @('127.0.0.1') -ForceFortress
+    if (-not $DryRun) { Clear-DnsClientCache }
     exit 0
 }
 
@@ -225,8 +230,8 @@ if ($service -and $service.Status -ne 'Running') {
         Start-Sleep -Seconds 5
         if (Test-AdGuard53) {
             Write-FailsafeLog 'AdGuard arranco correctamente; no hace falta el modo emergencia'
-            Set-SystemDns @('127.0.0.1')
             Set-FortressRules $true
+            Set-SystemDns -Servers @('127.0.0.1') -ForceFortress
             exit 0
         }
     }

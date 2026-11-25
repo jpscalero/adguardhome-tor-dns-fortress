@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Instala Node.js en modo portable dentro de la carpeta de la fortaleza.
 
@@ -71,8 +71,10 @@ if (Test-Path $nodeExe) {
     else { Write-Step 'node.exe presente pero no ejecutable; se reinstalara.' }
     if ($current) {
         $pathUser = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if (-not $pathUser) { $pathUser = '' }
         if ($pathUser -notlike ('*' + $nodeDir + '*')) {
-            [Environment]::SetEnvironmentVariable('Path', ($nodeDir + ';' + $pathUser), 'User')
+            $newPath = if ($pathUser) { $nodeDir + ';' + $pathUser } else { $nodeDir }
+            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
             Write-Step 'Anadido al PATH de usuario.'
         }
         exit 0
@@ -90,7 +92,8 @@ try {
     Write-Step 'Descargando SHASUMS256.txt y verificando integridad...'
     $sums = (Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content
     $expected = $null
-    foreach ($line in ($sums -split "`n")) {
+    foreach ($line in ($sums -split "`r?`n")) {
+        $line = $line.Trim()
         if ($line -match ('^([0-9a-fA-F]{64})\s+' + [Regex]::Escape($fileName) + '$')) {
             $expected = $Matches[1].ToLowerInvariant()
             break

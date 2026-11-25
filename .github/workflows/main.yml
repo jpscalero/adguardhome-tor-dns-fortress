@@ -36,6 +36,20 @@ jobs:
           if ($failed -ne 0) { throw 'Errores de sintaxis en scripts PowerShell.' }
           Write-Host 'Sintaxis PowerShell correcta.'
 
+      - name: bom-check (BOM UTF-8 en scripts PowerShell)
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem scripts -Recurse -Filter *.ps1 | ForEach-Object {
+            $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+            if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+              Write-Host ("::error file={0}::Falta BOM UTF-8 (EF BB BF)" -f $_.FullName)
+              $failed = $true
+            }
+          }
+          if ($failed) { throw 'Faltan BOM en scripts PowerShell.' }
+          Write-Host 'BOM correcto en scripts/*.ps1.'
+
       - name: PSScriptAnalyzer (errores bloquean, avisos informan)
         shell: pwsh
         run: |

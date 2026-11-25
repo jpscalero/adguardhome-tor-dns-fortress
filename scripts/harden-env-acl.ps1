@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Restringe los permisos de config\.env (contrasena del panel y clave de API).
 

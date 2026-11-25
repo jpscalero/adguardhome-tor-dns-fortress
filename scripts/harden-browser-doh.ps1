@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Evita que los navegadores se salten AdGuard Home con su propio DoH.
 
@@ -15,7 +15,8 @@
     Requiere administrador. Es reversible con -Undo.
 
 .PARAMETER Undo
-    Elimina las claves de politica y el policies.json creado por este script.
+    Elimina las claves de politica y revierte el policies.json de Firefox:
+    restaura la copia .fortress-bak si existe o quita solo DNSOverHTTPS.
 
 .PARAMETER DryRun
     Muestra las acciones sin aplicarlas.
@@ -28,6 +29,16 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+
+function Write-JsonNoBom {
+    param(
+        [string]$Path,
+        [object]$Object
+    )
+    $json = $Object | ConvertTo-Json -Depth 8
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path, $json, $utf8)
+}
 
 $policies = @(
     @{ Path = 'HKLM:\SOFTWARE\Policies\Google\Chrome'; Name = 'DnsOverHttpsMode'; Value = 'off'; Label = 'Chrome' },
@@ -55,20 +66,47 @@ foreach ($p in $policies) {
 }
 
 # Firefox: policies.json en la carpeta de distribucion
-$ffRoots = @(
-    (Join-Path $env:ProgramFiles 'Mozilla Firefox'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Mozilla Firefox')
-) | Where-Object { $_ -and (Test-Path $_) }
+$ffBases = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)
+if ($env:LOCALAPPDATA) { $ffBases += (Join-Path $env:LOCALAPPDATA 'Programs') }
+$ffRoots = @()
+foreach ($base in ($ffBases | Where-Object { $_ } | Select-Object -Unique)) {
+    foreach ($name in @('Mozilla Firefox', 'Mozilla Firefox ESR')) {
+        $candidate = Join-Path $base $name
+        if (Test-Path $candidate) { $ffRoots += $candidate }
+    }
+}
 
 foreach ($root in $ffRoots) {
     $dist = Join-Path $root 'distribution'
     $policyFile = Join-Path $dist 'policies.json'
+    $backupFile = Join-Path $dist 'policies.json.fortress-bak'
 
     if ($Undo) {
-        if (Test-Path $policyFile) {
-            if ($DryRun) { Write-Output ("DRY-RUN: borrar {0}" -f $policyFile); continue }
-            Remove-Item $policyFile -Force -ErrorAction SilentlyContinue
-            Write-Output ("Firefox: eliminado {0}" -f $policyFile)
+        if (-not (Test-Path $policyFile)) { continue }
+        if ($DryRun) {
+            if (Test-Path $backupFile) { Write-Output ("DRY-RUN: restaurar {0} desde {1}" -f $policyFile, $backupFile) }
+            else { Write-Output ("DRY-RUN: quitar DNSOverHTTPS de {0}" -f $policyFile) }
+            continue
+        }
+        if (Test-Path $backupFile) {
+            Copy-Item -Path $backupFile -Destination $policyFile -Force
+            Write-Output ("Firefox: restaurado {0} desde la copia de seguridad" -f $policyFile)
+            continue
+        }
+        try {
+            $current = Get-Content -Path $policyFile -Raw | ConvertFrom-Json
+            if ($current -and ($current.PSObject.Properties.Name -contains 'DNSOverHTTPS')) {
+                $current.PSObject.Properties.Remove('DNSOverHTTPS')
+                if (@($current.PSObject.Properties).Count -eq 0) {
+                    Remove-Item $policyFile -Force
+                    Write-Output ("Firefox: eliminado {0} (solo contenia DNSOverHTTPS)" -f $policyFile)
+                } else {
+                    Write-JsonNoBom -Path $policyFile -Object $current
+                    Write-Output ("Firefox: DNSOverHTTPS eliminado de {0}" -f $policyFile)
+                }
+            }
+        } catch {
+            Write-Output ("AVISO: no se pudo revertir {0}; revisalo a mano." -f $policyFile)
         }
         continue
     }
@@ -82,7 +120,23 @@ foreach ($root in $ffRoots) {
 
     $existing = $null
     if (Test-Path $policyFile) {
-        try { $existing = Get-Content -Path $policyFile -Raw | ConvertFrom-Json } catch { $existing = $null }
+        $raw = Get-Content -Path $policyFile -Raw
+        if ($raw -and $raw.Trim().Length -gt 0) {
+            try {
+                $existing = $raw | ConvertFrom-Json
+            } catch {
+                Write-Output ("AVISO: {0} no es JSON valido; no se modifica. Corrigelo o borralo y vuelve a ejecutar." -f $policyFile)
+                continue
+            }
+            if ($null -eq $existing -or $existing -is [System.Array] -or $existing -is [string] -or $existing -is [ValueType]) {
+                Write-Output ("AVISO: {0} no contiene un objeto de politicas; no se modifica." -f $policyFile)
+                continue
+            }
+            if (-not (Test-Path $backupFile)) {
+                Copy-Item -Path $policyFile -Destination $backupFile -Force
+                Write-Output ("Firefox: copia de seguridad en {0}" -f $backupFile)
+            }
+        }
     }
     if (-not $existing) { $existing = [pscustomobject]@{} }
 
@@ -92,7 +146,7 @@ foreach ($root in $ffRoots) {
     }
     $merged['DNSOverHTTPS'] = [ordered]@{ 'Enabled' = $false }
 
-    ($merged | ConvertTo-Json -Depth 8) | Set-Content -Path $policyFile -Encoding UTF8
+    Write-JsonNoBom -Path $policyFile -Object $merged
     Write-Output ("Firefox: DNSOverHTTPS desactivado en {0}" -f $policyFile)
 }
 

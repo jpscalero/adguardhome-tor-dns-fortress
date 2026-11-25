@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Desinstala la fortaleza y devuelve el equipo a su estado DNS original.
 
@@ -10,6 +10,7 @@
       3. Desactiva las reglas de firewall creadas por el instalador.
       4. Devuelve los adaptadores a DNS automatico (DHCP) y purga la cache.
       5. Revierte las politicas de DoH de los navegadores.
+      5.5. Revierte el hardening adicional de la edicion de Windows.
       6. Restaura la ACL original de config\.env (si existe respaldo).
 
     No borra datos salvo que se indique -RemoveData. No desinstala AdGuard Home,
@@ -109,6 +110,18 @@ if (Test-Path $browser) {
     if (-not $DryRun) { & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $browser -Undo }
 }
 
+# 5.5. Hardening adicional de la edicion de Windows
+$editionHardening = Join-Path $TargetDir 'apply-edition-hardening.ps1'
+if (Test-Path $editionHardening) {
+    Step 'Revirtiendo hardening adicional de la edicion de Windows'
+    if (-not $DryRun) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $editionHardening -TargetDir $TargetDir -Undo
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning '  No se pudo revertir todo el hardening de edicion; revisa edition-hardening.state.json.'
+        }
+    }
+}
+
 # 6. ACL del .env
 $acl = Join-Path $TargetDir 'harden-env-acl.ps1'
 if (Test-Path $acl) {
@@ -127,7 +140,7 @@ if ($RestorationSharedAccess) {
 
 # 8. Datos
 if ($RemoveData) {
-    foreach ($rel in @('logs', 'data', 'config\.env-acl-backup')) {
+    foreach ($rel in @('logs', 'data', 'config\.env-acl-backup', 'edition-hardening.report.json')) {
         $path = Join-Path $TargetDir $rel
         if (Test-Path $path) {
             Step ("Borrando {0}" -f $path)
