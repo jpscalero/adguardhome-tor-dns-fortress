@@ -18,7 +18,7 @@ jobs:
     name: PowerShell (sintaxis + analizador)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Parsear todos los .ps1
         shell: pwsh
@@ -64,7 +64,7 @@ jobs:
     name: Node (sintaxis + tests sin red)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -84,7 +84,7 @@ jobs:
     name: Paquete de release completo
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Comparar git archive con los ficheros versionados
         run: |
@@ -106,7 +106,7 @@ jobs:
     name: Invariantes de configuración
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -120,7 +120,7 @@ jobs:
     name: Escaneo de secretos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -132,7 +132,7 @@ jobs:
     name: Workflows y documentación
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: actionlint
         uses: raven-actions/actionlint@v2
