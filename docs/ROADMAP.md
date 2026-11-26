@@ -7,11 +7,12 @@ impacto real y con su motivo.
 
 ## Fase 5 — Independencia de terceros
 
-- [ ] **Perfil recursivo con `unbound`**: resolver desde la raíz sin delegar en
-      Quad9/Cloudflare. Es la única forma de que ningún tercero vea el patrón de
-      consultas, a cambio de latencia y de perder la cobertura de DoH.
-- [ ] **Selector de perfil** (`privacy` / `speed` / `censorship`) que aplique una
-      combinación coherente de upstreams, timeouts y listas.
+- [x] **Perfil recursivo con `unbound`**: resolver desde la raíz sin delegar en
+      Quad9/Cloudflare. Implementado en `config/unbound.conf.template` y
+      `scripts/setup-unbound.ps1` (loopback, DNSSEC, sin log de consultas).
+- [x] **Selector de perfil** (`privacy` / `speed` / `censorship`):
+      `scripts/apply-dns-profile.ps1` reescribe el bloque de upstreams con
+      respaldo, validación y rollback.
 - [ ] **Rotación programada de upstreams** con verificación de que el nuevo
       responde antes de cambiar.
 

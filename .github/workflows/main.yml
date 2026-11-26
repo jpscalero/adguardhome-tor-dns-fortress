@@ -80,6 +80,28 @@ jobs:
       - name: Tests unitarios (sin red, sin admin)
         run: node --test tests/
 
+  package:
+    name: Paquete de release completo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comparar git archive con los ficheros versionados
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git archive --format=zip --prefix=fortress-test/ -o dist/test.zip HEAD
+          git ls-files | sort > dist/expected.txt
+          unzip -Z1 dist/test.zip \
+            | sed 's#^fortress-test/##' \
+            | grep -v '/$' \
+            | sort > dist/actual.txt
+          if ! diff -u dist/expected.txt dist/actual.txt; then
+            echo '::error::git archive no incluye exactamente los ficheros versionados.'
+            exit 1
+          fi
+          echo "Paquete correcto: $(wc -l < dist/actual.txt) ficheros."
+
   config:
     name: Invariantes de configuración
     runs-on: ubuntu-latest

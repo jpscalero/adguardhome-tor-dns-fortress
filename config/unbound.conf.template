@@ -1,0 +1,84 @@
+# ==============================================================================
+# Resolutor recursivo propio (Unbound) — perfil privacy de Fortaleza DNS
+# ==============================================================================
+# Sustituye a Quad9/Cloudflare/AdGuard DNS: la consulta sale del equipo hacia la
+# raíz y recorre la delegación completa. Ningun resolutor de terceros ve el
+# patron de consultas. A cambio: mas latencia en cache fria y dependencia de
+# que el puerto 53 saliente funcione (Tor y GoodbyeDPI siguen intactos).
+#
+# Los marcadores __UNBOUND_DIR__ y __UNBOUND_ROOT_KEY__ los rellena
+# scripts/setup-unbound.ps1 al desplegar.
+# ==============================================================================
+
+server:
+    # Solo loopback: AdGuard Home es el unico cliente autorizado.
+    interface: 127.0.0.1
+    port: 5335
+    access-control: 127.0.0.0/8 allow
+    access-control: ::1 allow
+    do-ip4: yes
+    do-ip6: no
+    do-udp: yes
+    do-tcp: yes
+    prefer-ip4: yes
+    edns-buffer-size: 1232
+    max-udp-size: 1232
+
+    # Identidad: no responder sondas de version ni hostname.
+    hide-identity: yes
+    hide-version: yes
+    identity: "unbound"
+    version: ""
+
+    # Endurecimiento del protocolo.
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+    harden-referral-path: yes
+    harden-algo-downgrade: yes
+    use-caps-for-id: yes
+    qname-minimisation: yes
+    aggressive-nsec: yes
+    rrset-roundrobin: yes
+    minimal-responses: yes
+    unwanted-reply-threshold: 10000000
+
+    # Validacion DNSSEC local con seguimiento RFC 5011 de la clave raiz.
+    auto-trust-anchor-file: "__UNBOUND_ROOT_KEY__"
+    val-clean-additional: yes
+    val-permissive-mode: no
+
+    # Cache en RAM.
+    cache-min-ttl: 300
+    cache-max-ttl: 86400
+    msg-cache-size: 32m
+    rrset-cache-size: 64m
+    key-cache-size: 16m
+    neg-cache-size: 8m
+    prefetch: yes
+    prefetch-key: yes
+    serve-expired: yes
+    serve-expired-ttl: 0
+    serve-expired-reply-ttl: 30
+
+    num-threads: 2
+    so-reuseport: yes
+    outgoing-range: 4096
+
+    # Sin registro de consultas: privacidad por diseno.
+    verbosity: 0
+    logfile: ""
+    use-syslog: no
+    statistics-interval: 0
+    extended-statistics: no
+
+    # Windows: sin chroot ni usuario del sistema.
+    username: ""
+    directory: "__UNBOUND_DIR__"
+    chroot: ""
+
+remote-control:
+    control-enable: no
+
+python:
+    python-script: ""

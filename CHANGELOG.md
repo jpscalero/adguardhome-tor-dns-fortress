@@ -4,6 +4,69 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/), y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-11-25
+
+Cierre de la deuda operativa de la 2.0.1 y salto de la Fase 5: la fortaleza ya
+no depende de un resolutor de terceros y resiste mejor la manipulacion local.
+
+### Añadido
+
+- **Resolutor recursivo propio (`config/unbound.conf.template`,
+  `scripts/setup-unbound.ps1`)**: Unbound escucha solo en `127.0.0.1:5335`,
+  resuelve desde la raiz, valida DNSSEC con ancla de confianza RFC 5011 y no
+  escribe log de consultas. El instalador verifica el SHA256 del ZIP oficial y
+  registra servicio o tarea; `-Undo` lo retira.
+- **Perfiles DNS (`scripts/apply-dns-profile.ps1`)**: `privacy` (recursivo
+  propio), `speed` (DoH en paralelo sobre Tor) y `censorship` (DoH con timeouts
+  amplios para redes hostiles). Reescribe solo el bloque `FORTRESS-UPSTREAM`,
+  crea respaldo, valida con `--check-config` y revierte si falla. Nuevo
+  `DNS_PROFILE` en `config/.env`.
+- **Capa anti-manipulacion (`scripts/protect-fortress.ps1`)**: ACL de solo
+  lectura para Usuarios en scripts/lanzadores y acceso exclusivo de
+  SYSTEM/Administradores a `config`, `data` y `logs`; recuperacion automatica de
+  AdGuardHome, tor, GoodbyeDPI y unbound; watchdog con repeticion cada 5 minutos;
+  reglas de firewall entrantes para 3000, 9050, 9051, 5350 y 5335.
+- **Guardian del watchdog (`scripts/watchdog-guard.ps1`)**: cada 10 minutos
+  comprueba heartbeat, recrea la tarea del watchdog si desaparece, arranca
+  servicios, reactiva reglas anti-fuga y restaura scripts alterados.
+- **Integridad SHA256 (`scripts/integrity-check.ps1`)**: manifiesto y copia base
+  de scripts y binario; `-Create`, `-Verify` y `-Restore`. La suite falla si un
+  hash cambio.
+- **Privacidad del navegador (`scripts/harden-browser-privacy.ps1`)**: Firefox
+  con `privacy.resistFingerprinting` (zona horaria UTC, idioma en-US),
+  aislamiento de cookies y WebRTC desactivado; Chrome/Edge sin cookies de
+  terceros, sin WebRTC directo y con DoH apagado. Reversible con `-Undo`.
+- **Suite de 21 comprobaciones**: perfil recursivo, tareas reforzadas, ACL y
+  recuperacion de servicios, integridad y reglas entrantes.
+- **CI de paquete**: job que compara `git archive` con `git ls-files` para que
+  nunca vuelva a publicarse un ZIP incompleto.
+
+### Cambiado
+
+- **Release (`release.yml`)**: `workflow_dispatch` exige un tag `vX.Y.Z`
+  existente, hace checkout exacto, rechaza ramas, calcula el titulo
+  `# Fortaleza DNS <tag>` y verifica el contenido del ZIP antes de publicar.
+- **Instalador**: nuevos modificadores `-Profile`, `-SkipUnbound`,
+  `-SkipProtection` y `-SkipBrowserPrivacy`; el watchdog se registra con
+  repeticion y el guardian se anade al despliegue.
+- **Desinstalador**: revierte proteccion, privacidad del navegador y Unbound, y
+  elimina las reglas entrantes nuevas.
+- **Version del paquete**: `2.0.2`.
+
+### Corregido
+
+- **Deuda de la release 2.0.1**: el release manual ya no puede empaquetar la
+  rama `main` ni heredar el titulo de la version anterior; el cuerpo se genera
+  desde `docs/RELEASE-NOTES.md` con el tag real.
+
+### Notas de migracion
+
+- Nada se elimina. El perfil por defecto sigue siendo `speed`; para pasar a
+  recursivo: `scripts\setup-unbound.ps1 -PackagePath <zip>` y despues
+  `scripts\apply-dns-profile.ps1 -Profile privacy -Restart`.
+- La release `v2.0.0` debe borrarse a mano en GitHub (`gh release delete v2.0.0`);
+  requiere permisos del repositorio y no se automatiza desde el workflow.
+
 ## [Unreleased]
 
 ### Añadido

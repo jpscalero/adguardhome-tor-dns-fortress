@@ -15,10 +15,10 @@
 | Adversario | Capacidad | Qué hace la fortaleza |
 |---|---|---|
 | ISP con DPI | Ve metadatos, puede bloquear por SNI/DNS | DoH sobre Tor + GoodbyeDPI |
-| Resolutor de terceros | Ve consultas si se usa en claro | Todo el upstream va cifrado por SOCKS5 |
+| Resolutor de terceros | Ve consultas si se usa en claro | Perfil `privacy`: Unbound recursivo propio; perfil `speed`: DoH cifrado por SOCKS5 |
 | Malware local sin privilegios | Lee ficheros del usuario, lanza procesos | ACL del `.env`, reglas de firewall, centinela |
-| Malware local con administrador | Todo | **Nada**: ver `LIMITS.md` |
-| Sitio web visitado | Ve sesión, cookies, fingerprint | Nada (Tor no oculta el destino) |
+| Malware local con administrador | Todo | ACL, recuperación de servicios, watchdog con repetición, guardián, integridad SHA256 y firewall entrante. **No es invencible**: ver `LIMITS.md` |
+| Sitio web visitado | Ve sesión, cookies, fingerprint | Fingerprint uniforme (RFP), cookies aisladas y WebRTC off; una sesión iniciada sigue identificando |
 | App empaquetada del sistema | Lee ficheros con ACL heredada | Se elimina el SID `S-1-15-3-...` del `.env` |
 | Observador de red del edificio | Patrones de tráfico | Padding de Tor; latencia no ocultable |
 

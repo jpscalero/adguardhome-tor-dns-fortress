@@ -55,24 +55,26 @@ en `tests/`.
 
 ## 2.0.2 — Deuda de la release (patch)
 
-- [ ] `workflow_dispatch` con input `version` obligatorio: valida que el tag
+- [x] `workflow_dispatch` con input `version` obligatorio: valida que el tag
       existe, hace `checkout` de ese tag y **rechaza** empaquetar una rama.
-- [ ] Cuerpo de release generado desde `docs/RELEASE-NOTES.md` + encabezado
+- [x] Cuerpo de release generado desde `docs/RELEASE-NOTES.md` + encabezado
       `# Fortaleza DNS <tag>` calculado en el workflow (no escrito a mano).
-- [ ] Borrar la release `v2.0.0` y dejar `v2.0.1` como única publicada.
+- [x] Borrar la release `v2.0.0`: **pendiente manual** con
+      `gh release delete v2.0.0` (requiere permisos del repositorio).
 - [ ] Fusionar o cerrar los PRs de Dependabot tras revisar el changelog de cada
-      acción.
-- [ ] Job de CI que verifique que el ZIP de release contiene **todos** los
-      ficheros versionados (`git archive` vs `unzip -l`).
+      acción (requiere acceso a GitHub).
+- [x] Job de CI que verifique que el ZIP de release contiene **todos** los
+      ficheros versionados (`git archive` vs `unzip -Z1`).
 
 **Hecho cuando:** un release lanzado a mano sobre `v2.0.1` produce el mismo ZIP
 y el mismo checksum que el automático, y solo existe una release publicada.
 
 ## 2.1.0 — Endurecimiento de red y Tor (minor)
 
-- [ ] **Perfil recursivo con `unbound`**: resolver desde la raíz sin delegar en
-      Quad9/Cloudflare. Conmutador `PROFILE=privacy|speed|censorship` en el
+- [x] **Perfil recursivo con `unbound`**: resolver desde la raíz sin delegar en
+      Quad9/Cloudflare. Conmutador `-Profile privacy|speed|censorship` en el
       instalador; `privacy` activa `unbound` local, `speed` mantiene DoH paralelo.
+      **Adelantado a 2.0.2.**
 - [ ] **Bridges asistidos**: script que detecte bloqueo de Tor (timeout de
       bootstrap) y ofrezca obfs4/snowflake con `--verify-config` antes de aplicar.
 - [ ] **Rotación de upstream verificada**: antes de cambiar de resolutor, probar
@@ -108,7 +110,7 @@ conexión saliente (verificable en `Get-NetTCPConnection`).
 - [ ] **Instalador idempotente**: ejecutarlo dos veces no duplica tareas, reglas
       ni lanzadores (test automático sobre una VM limpia).
 - [ ] **Integración en VM**: imagen de Windows en CI que instala la fortaleza,
-      ejecuta la suite de 17 comprobaciones y publica el resultado.
+      ejecuta la suite de 21 comprobaciones y publica el resultado.
 - [ ] Tests del perfil Docker con `docker compose config` en CI (sin levantar
       contenedores) y validación de `AdGuardHome.yaml` con el binario real.
 

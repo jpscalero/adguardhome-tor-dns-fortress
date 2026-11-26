@@ -17,7 +17,12 @@ param(
     [switch]$SkipDiagnostics = $false,
     [ValidateSet('Auto', 'Home', 'Pro', 'Education', 'Enterprise')]
     [string]$EditionProfile = 'Auto',
-    [switch]$SkipEditionHardening = $false
+    [switch]$SkipEditionHardening = $false,
+    [ValidateSet('privacy', 'speed', 'censorship')]
+    [string]$Profile = 'speed',
+    [switch]$SkipUnbound = $false,
+    [switch]$SkipProtection = $false,
+    [switch]$SkipBrowserPrivacy = $false
 )
 
 # Ensure script is running as Administrator
@@ -59,9 +64,11 @@ if ($DryRun) {
     Write-Host "  6. Crear reglas de firewall: 53/UDP, 53/TCP, 853/TCP, 5353/UDP"
     Write-Host "  7. Registrar tareas: watchdog (boot) y failsafe (cada 2 min)"
     Write-Host "  8. Restringir la ACL de config\.env"
-    Write-Host "  9. Desactivar el DoH propio de Chrome/Edge/Firefox"
+    Write-Host "  9. Desactivar el DoH propio de Chrome/Edge/Firefox y uniformar el fingerprint"
     Write-Host " 10. Aplicar el hardening adicional de la edicion Windows"
-    Write-Host " 11. Ejecutar scripts/test_fortress.ps1"
+    Write-Host " 11. Desplegar el perfil DNS ($Profile); privacy instala Unbound recursivo"
+    Write-Host " 12. Aplicar la capa anti-manipulacion (ACL, servicios, guardian, integridad)"
+    Write-Host " 13. Ejecutar scripts/test_fortress.ps1"
     if ($fortressProfile) {
         Write-Host ""
         Write-Host ("  Perfil detectado: {0}" -f $fortressProfile.Summary) -ForegroundColor Cyan
@@ -123,6 +130,12 @@ if (-not (Test-Path $targetConfig) -or $Force) {
     Write-Host "  -> Archivo de configuración existente detectado en $targetConfig. Manteniendo configuración existente." -ForegroundColor Cyan
 }
 
+# 2.4. Plantilla de Unbound (la usa setup-unbound.ps1 desde TargetDir)
+$unboundTemplate = Join-Path $repoRoot "config\unbound.conf.template"
+if (Test-Path $unboundTemplate) {
+    Copy-Item -Path $unboundTemplate -Destination (Join-Path $TargetDir "unbound.conf.template") -Force
+}
+
 # 2.5. Tor Configuration Deployment
 Write-Host "[2.5/6] Verificando y desplegando configuración de Tor..." -ForegroundColor Yellow
 $torPaths = @("C:\Tor\torrc", "C:\Program Files\Tor\torrc")
@@ -146,6 +159,12 @@ $scriptsToCopy = @(
     "failsafe-dns.ps1",
     "harden-env-acl.ps1",
     "harden-browser-doh.ps1",
+    "harden-browser-privacy.ps1",
+    "setup-unbound.ps1",
+    "apply-dns-profile.ps1",
+    "protect-fortress.ps1",
+    "watchdog-guard.ps1",
+    "integrity-check.ps1",
     "windows-edition.ps1",
     "apply-edition-hardening.ps1",
     "ai_dns_guard.js",
@@ -216,8 +235,15 @@ $taskName = "AdGuardHome_Fortress_Watchdog"
 $watchdogScript = Join-Path $TargetDir "watchdog.ps1"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File `"$watchdogScript`""
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 365)
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -User "NT AUTHORITY\SYSTEM" -Force | Out-Null
+# Watchdog con repeticion: si un malware lo mata, el Programador lo relanza
+# en menos de 5 minutos. -MultipleInstances IgnoreNew evita duplicados.
+$triggers = @(
+    (New-ScheduledTaskTrigger -AtStartup),
+    (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650))
+)
+$principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650)
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Force | Out-Null
 Write-Host "  -> Tarea programada '$taskName' registrada y activa." -ForegroundColor Green
 
 # 5.5. Register Failsafe Scheduled Task (cada 2 minutos)
@@ -255,6 +281,14 @@ if (-not $SkipBrowserDoh) {
     }
 }
 
+if (-not $SkipBrowserPrivacy) {
+    $privacyScript = Join-Path $TargetDir "harden-browser-privacy.ps1"
+    if (Test-Path $privacyScript) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $privacyScript
+        Write-Host "  -> Fingerprint uniforme y cookies aisladas (Firefox/Chrome/Edge)." -ForegroundColor Green
+    }
+}
+
 # 5.7. Hardening adicional segun la edicion de Windows
 if (-not $SkipEditionHardening) {
     $editionHardening = Join-Path $TargetDir "apply-edition-hardening.ps1"
@@ -266,6 +300,41 @@ if (-not $SkipEditionHardening) {
         }
     } else {
         Write-Host "  -> AVISO: no se encontro apply-edition-hardening.ps1; se omite el hardening adicional." -ForegroundColor Yellow
+    }
+}
+
+# 5.8. Perfil DNS: speed (por defecto), privacy (Unbound recursivo) o censorship
+if (-not $SkipUnbound) {
+    if ($Profile -eq 'privacy') {
+        Write-Host "[5.8/6] Desplegando resolutor recursivo propio (Unbound)..." -ForegroundColor Yellow
+        $unboundScript = Join-Path $TargetDir "setup-unbound.ps1"
+        if (Test-Path $unboundScript) {
+            & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $unboundScript -TargetDir $TargetDir
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "  -> No se pudo instalar Unbound; se mantiene el perfil speed. Pasa -PackagePath al instalador o ejecuta scripts\setup-unbound.ps1."
+                $Profile = 'speed'
+            }
+        }
+    }
+    $profileScript = Join-Path $TargetDir "apply-dns-profile.ps1"
+    $configFile = Join-Path $TargetDir "AdGuardHome.yaml"
+    if ((Test-Path $profileScript) -and (Test-Path $configFile)) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $profileScript -Profile $Profile -TargetDir $TargetDir
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "  -> El perfil $Profile no se pudo aplicar; revisa AdGuardHome.yaml."
+        } else {
+            Write-Host "  -> Perfil DNS activo: $Profile." -ForegroundColor Green
+        }
+    }
+}
+
+# 5.9. Capa anti-manipulacion (ACL, recuperacion de servicios, guardian, integridad)
+if (-not $SkipProtection) {
+    Write-Host "[5.9/6] Aplicando proteccion anti-manipulacion..." -ForegroundColor Yellow
+    $protectScript = Join-Path $TargetDir "protect-fortress.ps1"
+    if (Test-Path $protectScript) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $protectScript -TargetDir $TargetDir
+        Write-Host "  -> ACL, recuperacion de servicios, guardian y manifiesto aplicados." -ForegroundColor Green
     }
 }
 

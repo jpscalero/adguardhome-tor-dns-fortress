@@ -59,7 +59,7 @@ if ($DryRun) {
 }
 
 # 1. Tareas programadas
-foreach ($task in @('AdGuardHome_Fortress_Watchdog', 'AdGuardHome_Fortress_Failsafe')) {
+foreach ($task in @('AdGuardHome_Fortress_Watchdog', 'AdGuardHome_Fortress_Failsafe', 'AdGuardHome_Fortress_Guard', 'AdGuardHome_Unbound')) {
     $existing = Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
     if (-not $existing) { continue }
     Step ("Eliminando tarea programada {0}" -f $task)
@@ -84,7 +84,13 @@ $rules = @(
     'AdGuard_Block_Outbound_DNS_UDP',
     'AdGuard_Block_Outbound_DNS_TCP',
     'AdGuard_Block_Outbound_DOT_853',
-    'AdGuard_Block_Outbound_MDNS'
+    'AdGuard_Block_Outbound_MDNS',
+    'AdGuard_Block_Inbound_Panel_3000',
+    'AdGuard_Block_Inbound_SOCKS_9050',
+    'AdGuard_Block_Inbound_TorControl_9051',
+    'AdGuard_Block_Inbound_DNSPort_5350',
+    'AdGuard_Block_Inbound_Unbound_5335',
+    'AdGuard_Block_Inbound_Unbound_5335_UDP'
 )
 foreach ($name in $rules) {
     if (-not (Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)) { continue }
@@ -106,7 +112,26 @@ if (Test-Path $failsafe) {
     }
 }
 
+# 5.0. Revertir la capa anti-manipulacion (ACL, guardian, reglas entrantes)
+$protect = Join-Path $TargetDir 'protect-fortress.ps1'
+if (Test-Path $protect) {
+    Step 'Revirtiendo la capa anti-manipulacion (ACL y reglas entrantes)'
+    if (-not $DryRun) { & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $protect -TargetDir $TargetDir -Undo }
+}
+
 # 5. Politicas de navegador
+$browserPrivacy = Join-Path $TargetDir 'harden-browser-privacy.ps1'
+if (Test-Path $browserPrivacy) {
+    Step 'Revirtiendo el perfil de privacidad del navegador'
+    if (-not $DryRun) { & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $browserPrivacy -Undo }
+}
+
+$unbound = Join-Path $TargetDir 'setup-unbound.ps1'
+if (Test-Path $unbound) {
+    Step 'Retirando el resolutor recursivo Unbound'
+    if (-not $DryRun) { & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $unbound -TargetDir $TargetDir -Undo }
+}
+
 $browser = Join-Path $TargetDir 'harden-browser-doh.ps1'
 if (Test-Path $browser) {
     Step 'Revirtiendo politicas de DoH de los navegadores'

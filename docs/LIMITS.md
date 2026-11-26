@@ -11,8 +11,11 @@ que te conectas te identifica igual**: sesión iniciada, cookies, fingerprint de
 navegador, zona horaria, idioma. Si entras en tu correo con Tor, el correo sabe
 quién eres.
 
-- Mitigación: navegador con fingerprint uniforme (Tor Browser) y sesiones
-  separadas. No hay nada que este repo pueda hacer por ti aquí.
+- Mitigación: `scripts/harden-browser-privacy.ps1` activa
+  `privacy.resistFingerprinting` en Firefox (fingerprint uniforme, zona horaria
+  UTC e idioma en-US), aísla cookies y desactiva WebRTC; Chrome/Edge bloquean
+  cookies de terceros. Aun así, **una sesión iniciada te identifica**: usa un
+  perfil sin cuentas para navegar y otro distinto para el correo.
 
 ## 2. El resolutor DoH ve tus consultas
 
@@ -21,10 +24,12 @@ estás delegando la confidencialidad DNS en terceros. La ventaja es que **no ven
 tu IP real** (van por Tor); la desventaja es que ven el dominio consultado y
 pueden correlacionar patrones entre sesiones.
 
-- Mitigación: `.onion` por `DNSPort` (sin terceros), rotación periódica de
-  upstream y el perfil recursivo documentado en `docs/ARCHITECTURE.md`.
-- No implementado aún: resolver recursivo propio (`unbound`) para no depender de
-  nadie. Es la Fase 5 del roadmap.
+- Mitigación: perfil `privacy` con **Unbound recursivo propio**
+  (`scripts/setup-unbound.ps1` + `scripts/apply-dns-profile.ps1`), que resuelve
+  desde la raíz con DNSSEC local y no delega en nadie. También `.onion` por
+  `DNSPort` (sin terceros) y rotación periódica de upstream en perfiles DoH.
+- Coste del perfil recursivo: más latencia en caché fría y dependencia de que
+  el puerto 53 saliente funcione. El perfil `speed` sigue disponible.
 
 ## 3. El centinela AI envía dominios a Google (modo `full`)
 
@@ -67,10 +72,17 @@ alguien promete "DNS instantáneo y anónimo", está mintiendo en una de las dos
 
 ## 7. No hay protección ante un host comprometido
 
-Si hay malware con privilegios de administrador, puede desactivar el watchdog,
-las reglas de firewall y el servicio. Esta fortaleza protege la **capa DNS**, no
-sustituye un EDR. Lo que sí aporta: el centinela detecta DGA y beaconing, y el
-failsafe evita que una caída te deje sin red.
+Si hay malware con privilegios de administrador, **puede** desactivar el
+watchdog, las reglas de firewall y el servicio: un administrador tiene la última
+palabra. Esta fortaleza protege la **capa DNS**, no sustituye un EDR.
+
+- Mitigación implementada (`scripts/protect-fortress.ps1`, `watchdog-guard.ps1`,
+  `integrity-check.ps1`): ACL de solo lectura, recuperación automática de
+  servicios, watchdog con repetición cada 5 minutos, guardián cada 10 minutos,
+  reglas entrantes y manifiesto SHA256 con restauración. Sube el coste y cierra
+  las vías triviales; no detiene a un atacante con control total del kernel.
+- Lo que sí aporta el núcleo: el centinela detecta DGA y beaconing, y el failsafe
+  evita que una caída te deje sin red.
 
 ## 8. Efectos secundarios conocidos
 

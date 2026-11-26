@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag ya existente, por ejemplo v2.0.2'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,27 +20,78 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Construir paquete
+      - name: Resolver version, validar tag y hacer checkout exacto
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          VER="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VER="${DISPATCH_VERSION}"
+          else
+            VER="${GITHUB_REF_NAME}"
+          fi
+          if ! printf '%s' "$VER" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::La version debe ser un tag vX.Y.Z, no '$VER'."
+            exit 1
+          fi
+          git fetch --tags --force
+          if ! git rev-parse -q --verify "refs/tags/${VER}" >/dev/null; then
+            echo "::error::El tag ${VER} no existe. Crea el tag antes de lanzar el release."
+            exit 1
+          fi
+          git checkout --force "refs/tags/${VER}"
+          EXACT="$(git describe --exact-match --tags HEAD 2>/dev/null || true)"
+          if [ "$EXACT" != "$VER" ]; then
+            echo "::error::HEAD no es el tag ${VER} (es '${EXACT}'). Se rechaza empaquetar una rama."
+            exit 1
+          fi
+          echo "VERSION=${VER}" >> "$GITHUB_ENV"
+          echo "Publicando ${VER} desde $(git rev-parse --short HEAD)."
+
+      - name: Construir paquete y verificar que no falta nada
+        run: |
+          set -euo pipefail
+          VER="${VERSION}"
           mkdir -p dist
-          # git archive empaqueta exactamente lo versionado: sin listas manuales
-          # que se olviden de docker/ o .github/ (paso en v2.0.0).
+          # git archive empaqueta exactamente lo versionado: sin listas manuales.
           git archive --format=zip --prefix="fortress-${VER}/" -o "dist/fortress-${VER}.zip" HEAD
+          git ls-tree -r --name-only "$VER" | sort > dist/expected.txt
+          unzip -Z1 "dist/fortress-${VER}.zip" \
+            | sed "s#^fortress-${VER}/##" \
+            | grep -v '/$' \
+            | sort > dist/actual.txt
+          if ! diff -u dist/expected.txt dist/actual.txt; then
+            echo "::error::El ZIP no coincide con los ficheros versionados del tag."
+            exit 1
+          fi
           ( cd dist && sha256sum "fortress-${VER}.zip" > SHA256SUMS )
           echo "--- contenido ---"
           cat dist/SHA256SUMS
           echo "--- resumen del zip ---"
           unzip -l "dist/fortress-${VER}.zip" | tail -3
+          echo "--- ficheros: $(wc -l < dist/actual.txt) ---"
+
+      - name: Generar cuerpo de la release
+        run: |
+          set -euo pipefail
+          {
+            echo "# Fortaleza DNS ${VERSION}"
+            echo ""
+            cat docs/RELEASE-NOTES.md
+          } > dist/release-body.md
+          cat dist/release-body.md
 
       - name: Publicar release
         uses: softprops/action-gh-release@v2
         with:
+          name: 'Fortaleza DNS ${{ env.VERSION }}'
+          tag_name: ${{ env.VERSION }}
           files: |
             dist/fortress-*.zip
             dist/SHA256SUMS
-          generate_release_notes: true
-          body_path: docs/RELEASE-NOTES.md
+          generate_release_notes: false
+          body_path: dist/release-body.md
           fail_on_unmatched_files: true

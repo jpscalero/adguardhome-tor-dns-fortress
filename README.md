@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows 11 / 10](https://img.shields.io/badge/Platform-Windows%2011%20%2F%2010-0078D6.svg)]()
-[![DNS: DoH + Tor + DNSSEC](https://img.shields.io/badge/DNS-DoH%20%2B%20Tor%20%2B%20DNSSEC-brightgreen.svg)]()
+[![DNS: DoH + Tor + Unbound + DNSSEC](https://img.shields.io/badge/DNS-DoH%20%2B%20Tor%20%2B%20Unbound%20%2B%20DNSSEC-brightgreen.svg)]()
 [![Evasion: GoodbyeDPI](https://img.shields.io/badge/Evasion-GoodbyeDPI-orange.svg)]()
 [![Defense: AI Sentinel](https://img.shields.io/badge/Defense-AI%20Sentinel%20%2B%20Decoy-purple.svg)]()
 [![CI / Security Audit](https://github.com/jpscalero/adguardhome-tor-dns-fortress/actions/workflows/main.yml/badge.svg)](https://github.com/jpscalero/adguardhome-tor-dns-fortress/actions/workflows/main.yml)
@@ -83,6 +83,9 @@ flowchart TD
 | **🤖 Centinela AI en Tiempo Real** | Script Node.js que analiza el query log en vivo, calcula entropía de Shannon (detección de malware DGA) y vigila balizas C2 periódicas. |
 | **🎲 Generador de Tráfico Señuelo (Decoy)** | Inyecta ruido estadístico y consultas aleatorias con jitter a sitios neutrales y académicos para romper el perfilado de hábitos de navegación. |
 | **🐕 Watchdog Autorreparable** | Servicio supervisor en segundo plano que vigila el estado de Tor, AdGuard Home y GoodbyeDPI, reiniciándolos automáticamente ante fallos. |
+| **🌱 Resolutor recursivo propio (Unbound)** | Perfil `privacy`: resuelve desde la raíz con validación DNSSEC local, sin delegar en Quad9/Cloudflare. Ningún tercero ve el patrón de consultas. |
+| **🔐 Capa anti-manipulación** | ACL de solo lectura, recuperación automática de servicios, watchdog con repetición cada 5 min, guardián cada 10 min y manifiesto SHA256 de los scripts. |
+| **🕵️ Privacidad del navegador** | Firefox con fingerprint uniforme (zona horaria UTC, idioma en-US) y cookies aisladas; Chrome/Edge sin cookies de terceros ni WebRTC directo. |
 | **🪟 Perfiles por edición de Windows** | Detecta Home, Pro, Education o Enterprise y aplica solo el hardening que esa edición soporta, sin romper el núcleo DNS/Tor. |
 
 ---
@@ -159,8 +162,25 @@ El instalador:
 * Copia la plantilla de configuración blindada `AdGuardHome.template.yaml` si no existe una configuración previa.
 * Configura los adaptadores de red de Windows hacia `127.0.0.1`, incluido Ethernet.
 * Detecta Windows Home/Pro/Education/Enterprise y aplica el hardening que permite cada edición.
-* Registra la tarea programada del Watchdog autorreparable.
-* Ejecuta la suite de verificación de diagnóstico.
+* Aplica el perfil DNS elegido (`-Profile speed|privacy|censorship`); `privacy` despliega Unbound recursivo.
+* Uniforma el fingerprint del navegador y aísla cookies (`harden-browser-privacy.ps1`).
+* Blinda scripts, servicios y tareas contra manipulación (`protect-fortress.ps1`).
+* Registra el Watchdog con repetición cada 5 minutos y su guardián cada 10.
+* Ejecuta la suite de verificación de 21 comprobaciones.
+
+Perfil recursivo propio (opcional, recomendado para máxima privacidad):
+
+```powershell
+# El ZIP oficial de Unbound se descarga aparte y se verifica su SHA256
+powershell -ExecutionPolicy Bypass -File scripts\setup-unbound.ps1 -PackagePath .\unbound-X.Y.Z.zip
+powershell -ExecutionPolicy Bypass -File scripts\apply-dns-profile.ps1 -Profile privacy -Restart
+
+# Volver al perfil DoH sobre Tor
+powershell -ExecutionPolicy Bypass -File scripts\apply-dns-profile.ps1 -Profile speed -Restart
+```
+
+El instalador también acepta `-Profile speed|privacy|censorship`; si eliges
+`privacy` sin haber desplegado Unbound, avisa y conserva `speed`.
 
 ---
 
@@ -198,9 +218,13 @@ Salida esperada:
 [15] DoH del navegador desactivado por politica (Chrome/Edge)... OK
 [16] Integridad del binario de AdGuardHome (hash registrado)... OK
 [17] DNS real de Windows apunta a la fortaleza (127.0.0.1)... OK
+[18] Perfil DNS activo y resolutor recursivo propio (Unbound)... OK
+[19] Watchdog con repeticion y guardian anti-manipulacion registrados... OK
+[20] Directorio protegido y servicios con recuperacion automatica... OK
+[21] Integridad de scripts y puertos sensibles cerrados al exterior... OK
 
 ==========================================================
-   ✅ TODAS LAS PRUEBAS SUPERADAS (17/17): FORTALEZA 100% ACTIVA
+   ✅ TODAS LAS PRUEBAS SUPERADAS (21/21): FORTALEZA 100% ACTIVA
 ==========================================================
 ```
 
@@ -228,6 +252,7 @@ adguardhome-tor-dns-fortress/
 ├── config/
 │   ├── AdGuardHome.template.yaml    # Configuración maestra blindada de AdGuard Home
 │   ├── torrc.template                # Configuración endurecida del servicio Tor
+│   ├── unbound.conf.template         # Resolutor recursivo: solo loopback + DNSSEC
 │   └── .env.example                 # Variables de entorno y credenciales de ejemplo
 ├── scripts/
 │   ├── install_fortress.ps1         # Instalador automatizado para Windows 11/10
@@ -236,7 +261,13 @@ adguardhome-tor-dns-fortress/
 │   ├── windows-edition.ps1          # Detección de Home/Pro/Education/Enterprise
 │   ├── apply-edition-hardening.ps1  # Hardening reversible según la edición
 │   ├── ai_dns_guard.js              # Centinela AI de detección de amenazas y DGA
-│   └── decoy_dns.js                 # Generador de tráfico señuelo y ofuscación
+│   ├── decoy_dns.js                 # Generador de tráfico señuelo y ofuscación
+│   ├── setup-unbound.ps1            # Instala el resolutor recursivo (hash verificado)
+│   ├── apply-dns-profile.ps1        # Perfiles privacy / speed / censorship
+│   ├── protect-fortress.ps1         # ACL, servicios, watchdog, firewall, integridad
+│   ├── watchdog-guard.ps1           # Resucita el watchdog y repara reglas/servicios
+│   ├── integrity-check.ps1          # Manifiesto SHA256 y restauración
+│   └── harden-browser-privacy.ps1   # Fingerprint uniforme y cookies aisladas
 ├── launchers/
 │   ├── start_watchdog.vbs           # Lanzador silencioso en segundo plano para Watchdog
 │   ├── start_ai_guard.vbs           # Lanzador silencioso para Centinela AI
@@ -278,6 +309,31 @@ Toda la documentación técnica exhaustiva está disponible en la **[Wiki Oficia
 
 ---
 
+## 💚 Apoyar el proyecto (Revolut)
+
+El proyecto es y seguirá siendo open source bajo licencia MIT. Si te resulta
+útil, puedes donar directamente a mi cuenta de Revolut, sin tiendas, licencias
+ni pedidos de por medio:
+
+**https://revolut.me/jpscalero**
+
+El botón **Sponsor** de GitHub usa el enlace declarado en
+[`.github/FUNDING.yml`](.github/FUNDING.yml). No hay pasarela propia, ni carrito,
+ni datos de clientes: la donación se hace en Revolut y este repositorio no
+recibe nada.
+
+## 🧭 Canales oficiales (todo en GitHub)
+
+| Qué | Dónde |
+|---|---|
+| Código y documentación | Este repositorio y [`docs/`](docs/) |
+| Descargas | [Releases](https://github.com/jpscalero/adguardhome-tor-dns-fortress/releases) |
+| Soporte comunitario | [Issues](https://github.com/jpscalero/adguardhome-tor-dns-fortress/issues) |
+| Donaciones | [Revolut](https://revolut.me/jpscalero) |
+
+No hay página web externa: la portada, la documentación técnica y las novedades
+viven en el README, en `docs/` y en las releases de GitHub.
+
 ## 👤 Autor
 * **jpscalero** - [GitHub](https://github.com/jpscalero)
 
@@ -295,8 +351,9 @@ Toda la documentación técnica exhaustiva está disponible en la **[Wiki Oficia
 |---|---|---|
 | 1. Profesionalización | CI real (PowerShell, Node, config, secretos, docs), plantillas de issues y PR, `NOTICE`, `docs/LIMITS.md` | ✅ |
 | 2. Correcciones de producción | Failsafe de red, ACL de `config/.env`, Node portable con SHA256, lanzadores `.cmd`/`.vbs` y watchdog sin bucles | ✅ |
-| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 17 pruebas | ✅ |
+| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 21 pruebas | ✅ |
 | 4. Operación | Desinstalador con rollback, tests sin red, `-DryRun` en el instalador, perfil Docker/Linux | ✅ |
+| 5. Independencia y protección | Unbound recursivo, perfiles DNS, capa anti-manipulación, integridad SHA256 y privacidad del navegador | ✅ |
 
 ## 🔒 Privacidad del centinela: AI_MODE
 

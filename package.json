@@ -1,6 +1,6 @@
 {
   "name": "adguardhome-tor-dns-fortress",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "Ultra-Hardened DNS Privacy & Anti-Censorship Fortress for Windows (AdGuard Home + Tor + GoodbyeDPI + AI Guard + Decoy)",
   "main": "scripts/ai_dns_guard.js",
   "engines": {

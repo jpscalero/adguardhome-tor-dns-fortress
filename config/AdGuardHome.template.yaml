@@ -83,6 +83,9 @@ dns:
   #   hace que el resolutor vea una salida de Tor y no tu IP real.
   #
   # Verificado en produccion con: --check-config, DNSSEC y salida Tor.
+  # >>> FORTRESS-UPSTREAM >>>
+  # Perfil por defecto: speed (DoH en paralelo por IP fija a traves de Tor).
+  # Cambia de perfil con scripts/apply-dns-profile.ps1 sin editar a mano.
   upstream_dns:
     # Quad9 (Suiza, filtrado de malware, valida DNSSEC)
     - https://9.9.9.9/dns-query
@@ -120,6 +123,7 @@ dns:
   upstream_mode: parallel
   fastest_timeout: 1s
 
+  # <<< FORTRESS-UPSTREAM <<<
   allowed_clients: []
   disallowed_clients: []
 

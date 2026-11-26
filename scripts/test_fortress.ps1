@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# 🛡️ Fortress Verification & Health Diagnostics Suite (17-Point Audit)
+# 🛡️ Fortress Verification & Health Diagnostics Suite (21-Point Audit)
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # ==============================================================================
@@ -298,6 +298,100 @@ Assert-Check "DNS real de Windows apunta a la fortaleza (127.0.0.1)" {
 
     Write-Host ('(DNS real no apunta a la fortaleza: {0}) ' -f ($bad -join '; ')) -NoNewline -ForegroundColor Yellow
     return $false
+}
+
+# 18. Perfil DNS activo (recursivo propio o DoH)
+Assert-Check "Perfil DNS activo y resolutor recursivo propio (Unbound)" {
+    $fortressDir18 = if ($env:FORTRESS_DIR) { $env:FORTRESS_DIR } else { 'C:\AdGuardHome' }
+    $envFile18 = Join-Path $fortressDir18 'config\.env'
+    $profile = 'speed'
+    if (Test-Path $envFile18) {
+        $match = [regex]::Match((Get-Content $envFile18 -Raw), '(?m)^\s*DNS_PROFILE\s*=\s*(\w+)')
+        if ($match.Success) { $profile = $match.Groups[1].Value.ToLowerInvariant() }
+    }
+    if ($profile -ne 'privacy') {
+        Write-Host (" (perfil {0}; el recursivo se activa con -Profile privacy) " -f $profile) -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $ep = Get-NetUDPEndpoint -LocalPort 5335 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq '127.0.0.1' }
+    if (-not $ep) {
+        Write-Host " (perfil privacy pero Unbound no escucha en 5335 -> setup-unbound.ps1) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    $res = Resolve-DnsName -Name 'example.com' -Server '127.0.0.1' -Port 5335 -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue
+    if (-not $res) {
+        Write-Host " (Unbound escucha pero no resuelve) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "(recursivo 127.0.0.1:5335) " -NoNewline -ForegroundColor Gray
+    return $true
+}
+
+# 19. Watchdog reforzado y guardian
+Assert-Check "Watchdog con repeticion y guardian anti-manipulacion registrados" {
+    $wd = Get-ScheduledTask -TaskName 'AdGuardHome_Fortress_Watchdog' -ErrorAction SilentlyContinue
+    $guard = Get-ScheduledTask -TaskName 'AdGuardHome_Fortress_Guard' -ErrorAction SilentlyContinue
+    if ($wd -and $guard) {
+        $repetition = @($wd.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval })
+        if ($repetition.Count -gt 0) { return $true }
+        Write-Host " (watchdog sin trigger de repeticion -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    Write-Host " (faltan tareas -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
+    return "WARN"
+}
+
+# 20. ACL del directorio y recuperacion de servicios
+Assert-Check "Directorio protegido y servicios con recuperacion automatica" {
+    $fortressDir20 = if ($env:FORTRESS_DIR) { $env:FORTRESS_DIR } else { 'C:\AdGuardHome' }
+    if (-not (Test-Path $fortressDir20)) {
+        Write-Host " (directorio ausente) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $acl = Get-Acl $fortressDir20
+    $writableUsers = @($acl.Access | Where-Object {
+        $_.AccessControlType -eq 'Allow' -and
+        $_.IdentityReference -match 'Users|Usuarios|Everyone|Authenticated' -and
+        ($_.FileSystemRights -match 'Write|Modify|FullControl')
+    })
+    if ($writableUsers.Count -gt 0) {
+        Write-Host " (Usuarios pueden escribir -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    $failure = (& sc.exe qfailure AdGuardHome 2>&1 | Out-String)
+    if ($failure -notmatch 'RESTART') {
+        Write-Host " (AdGuardHome sin acciones de recuperacion -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    return $true
+}
+
+# 21. Integridad de scripts y bloqueo entrante de puertos sensibles
+Assert-Check "Integridad de scripts y puertos sensibles cerrados al exterior" {
+    $fortressDir21 = if ($env:FORTRESS_DIR) { $env:FORTRESS_DIR } else { 'C:\AdGuardHome' }
+    $manifest = Join-Path $fortressDir21 'fortress.manifest.json'
+    if (-not (Test-Path $manifest)) {
+        Write-Host " (sin manifiesto -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $checker = Join-Path $fortressDir21 'integrity-check.ps1'
+    if (Test-Path $checker) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $checker -Verify -TargetDir $fortressDir21 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host " (hashes alterados -> integrity-check.ps1 -Restore) " -NoNewline -ForegroundColor Yellow
+            return $false
+        }
+    }
+    $missing = @()
+    foreach ($ruleName in @('AdGuard_Block_Inbound_Panel_3000', 'AdGuard_Block_Inbound_SOCKS_9050')) {
+        $r = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+        if (-not $r -or $r.Enabled -ne 'True') { $missing += $ruleName }
+    }
+    if ($missing.Count -gt 0) {
+        Write-Host (" (faltan reglas entrantes: {0}) " -f ($missing -join ', ')) -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    return $true
 }
 
 Write-Host ""

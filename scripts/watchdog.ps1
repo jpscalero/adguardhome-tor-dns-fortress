@@ -223,7 +223,7 @@ while ($true) {
 
             $cfgPath = Join-Path $AdGuardDir "AdGuardHome.yaml"
             if ($activeIp -and (Test-Path $cfgPath)) {
-                $cfg = Get-Content $cfgPath -Raw
+                $cfg = [System.IO.File]::ReadAllText($cfgPath)
                 if ($cfg -match "bind_hosts:\s*\r?\n\s*-\s*'?127\.0\.0\.1'?\s*\r?\n\s*-\s*'?(\d{1,3}(?:\.\d{1,3}){3})'?\s*\r?\n\s*-\s*'?::1'?") {
                     $boundIp = $Matches[1]
                     $bindBlock = $Matches[0]
@@ -231,7 +231,7 @@ while ($true) {
                         Write-WatchdogLog "WARN" "Cambio de IP de red detectado ($boundIp -> $activeIp). Actualizando bind_hosts..."
                         $newBlock = $bindBlock.Replace($boundIp, $activeIp)
                         $cfg = $cfg.Replace($bindBlock, $newBlock)
-                        Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8 -Force
+                        [System.IO.File]::WriteAllText($cfgPath, $cfg, (New-Object System.Text.UTF8Encoding($false)))
                         Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
                         Write-WatchdogLog "HEAL" "[AUTO-REPAIR] AdGuard Home reconfigurado y reiniciado con la nueva IP activa ($activeIp)."
                     }
@@ -457,6 +457,31 @@ while ($true) {
             }
         } catch {
             Write-WatchdogLog "ERROR" "Error comprobando Generador Decoy: $($_.Exception.Message)"
+        }
+
+        # --------------------------------------------------------------------------
+        # 3.9. MUTUAL RESURRECTION: recreate the guard task if it disappeared
+        # --------------------------------------------------------------------------
+        if ($cycle % 10 -eq 0) {
+            try {
+                $guardTask = Get-ScheduledTask -TaskName "AdGuardHome_Fortress_Guard" -ErrorAction SilentlyContinue
+                if (-not $guardTask) {
+                    $guardScript = Join-Path $AdGuardDir "watchdog-guard.ps1"
+                    if (Test-Path $guardScript) {
+                        $guardAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File `"$guardScript`""
+                        $guardTriggers = @(
+                            (New-ScheduledTaskTrigger -AtStartup),
+                            (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650))
+                        )
+                        $guardSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650)
+                        $guardPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+                        Register-ScheduledTask -TaskName "AdGuardHome_Fortress_Guard" -Action $guardAction -Trigger $guardTriggers -Settings $guardSettings -Principal $guardPrincipal -Force | Out-Null
+                        Write-WatchdogLog "HEAL" "[ANTI-TAMPER] Guardian eliminado; tarea recreada."
+                    }
+                }
+            } catch {
+                Write-WatchdogLog "WARN" "No se pudo verificar el guardian: $($_.Exception.Message)"
+            }
         }
 
         # --------------------------------------------------------------------------

@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 AGH = ROOT / "config" / "AdGuardHome.template.yaml"
 TORRC = ROOT / "config" / "torrc.template"
+UNBOUND = ROOT / "config" / "unbound.conf.template"
 
 errors: list[str] = []
 
@@ -83,11 +84,15 @@ def validate_fortress() -> None:
         # Los corchetes son upstreams por dominio ("[/onion/]127.0.0.1:5350").
         if up_str.startswith("[/") or up_str.startswith("[/*"):
             continue
+        # El perfil privacy usa el recursivo propio en loopback: no hay tercero
+        # al que cifrar y el trafico no sale del equipo hasta la raiz DNS.
+        is_loopback_recursive = up_str.startswith("127.0.0.1:5335") or up_str.startswith("[::1]:5335")
         check(
             up_str.startswith("https://")
             or up_str.startswith("tls://")
             or up_str.startswith("quic://")
-            or up_str.startswith("h3://"),
+            or up_str.startswith("h3://")
+            or is_loopback_recursive,
             f"upstream sin cifrar: {up_str}",
         )
 
@@ -111,6 +116,13 @@ def validate_fortress() -> None:
 
     bootstrap = dns.get("bootstrap_dns") or []
     check(len(bootstrap) > 0, "dns.bootstrap_dns no puede estar vacio")
+
+    raw_cfg = AGH.read_text(encoding="utf-8-sig")
+    check(
+        "# >>> FORTRESS-UPSTREAM >>>" in raw_cfg
+        and "# <<< FORTRESS-UPSTREAM <<<" in raw_cfg,
+        "faltan los marcadores FORTRESS-UPSTREAM que usa apply-dns-profile.ps1",
+    )
 
     http = cfg.get("http", {}) or {}
     bind = http.get("address", "")
@@ -147,6 +159,24 @@ def validate_torrc() -> None:
     print("  OK   garantias de torrc.template")
 
 
+def validate_unbound() -> None:
+    if not UNBOUND.exists():
+        errors.append("Falta config/unbound.conf.template")
+        return
+    text = UNBOUND.read_text(encoding="utf-8-sig")
+    for needle, why in [
+        ("interface: 127.0.0.1", "Unbound debe escuchar solo en loopback"),
+        ("port: 5335", "el puerto del recursivo debe ser 5335"),
+        ("access-control: 127.0.0.0/8 allow", "falta la ACL de loopback"),
+        ("auto-trust-anchor-file", "sin ancla de confianza no hay DNSSEC"),
+        ("qname-minimisation: yes", "falta qname minimisation"),
+        ("hide-version: yes", "Unbound no debe revelar su version"),
+    ]:
+        check(needle in text, f"unbound.conf: falta '{needle}' ({why})")
+    check("port: 53\n" not in text, "Unbound no debe ocupar el puerto 53: AdGuard es el unico resolutor local")
+    print("  OK   garantias de unbound.conf.template")
+
+
 def main() -> int:
     print("Validando YAML del repositorio...")
     validate_all_yaml()
@@ -154,6 +184,7 @@ def main() -> int:
     print("Validando garantias de la fortaleza...")
     validate_fortress()
     validate_torrc()
+    validate_unbound()
 
     if errors:
         print("")
