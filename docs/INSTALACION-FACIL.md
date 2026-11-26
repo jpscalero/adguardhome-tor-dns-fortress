@@ -241,7 +241,7 @@ algún punto salga en amarillo/rojo: espera dos minutos y ejecuta
 4. Al final verás un resumen:
 
    ```text
-   ✅ TODAS LAS PRUEBAS SUPERADAS (21/21): FORTALEZA 100% ACTIVA
+   ✅ TODAS LAS PRUEBAS SUPERADAS (22/22): FORTALEZA 100% ACTIVA
    ```
 
    o

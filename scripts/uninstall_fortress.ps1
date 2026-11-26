@@ -10,6 +10,7 @@
       3. Desactiva las reglas de firewall creadas por el instalador.
       4. Devuelve los adaptadores a DNS automatico (DHCP) y purga la cache.
       5. Revierte las politicas de DoH de los navegadores.
+      5.4. Revierte LLMNR, NetBIOS, WPAD y SMBv1.
       5.5. Revierte el hardening adicional de la edicion de Windows.
       6. Restaura la ACL original de config\.env (si existe respaldo).
 
@@ -126,6 +127,17 @@ if (Test-Path $browserPrivacy) {
     if (-not $DryRun) { & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $browserPrivacy -Undo }
 }
 
+$networkHardening = Join-Path $TargetDir 'harden-network-protocols.ps1'
+if (Test-Path $networkHardening) {
+    Step 'Revirtiendo el endurecimiento de protocolos de red (LLMNR/NetBIOS/WPAD/SMBv1)'
+    if (-not $DryRun) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $networkHardening -TargetDir $TargetDir -Undo
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning '  No se pudo revertir todo; revisa network-hardening.state.json.'
+        }
+    }
+}
+
 $unbound = Join-Path $TargetDir 'setup-unbound.ps1'
 if (Test-Path $unbound) {
     Step 'Retirando el resolutor recursivo Unbound'
@@ -168,7 +180,7 @@ if ($RestorationSharedAccess) {
 
 # 8. Datos
 if ($RemoveData) {
-    foreach ($rel in @('logs', 'data', 'config\.env-acl-backup', 'edition-hardening.report.json')) {
+    foreach ($rel in @('logs', 'data', 'config\.env-acl-backup', 'edition-hardening.report.json', 'network-hardening.state.json')) {
         $path = Join-Path $TargetDir $rel
         if (Test-Path $path) {
             Step ("Borrando {0}" -f $path)

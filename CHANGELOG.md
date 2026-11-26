@@ -4,6 +4,44 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/), y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-11-26
+
+Parche de seguridad: cierra el descubrimiento de nombres y SMBv1, las vias
+clasicas de envenenamiento y relevo de credenciales en redes locales.
+
+### Añadido
+
+- **Endurecimiento de protocolos locales
+  (`scripts/harden-network-protocols.ps1`)**: desactiva LLMNR
+  (`EnableMulticast=0`), NetBIOS sobre TCP/IP en todos los adaptadores
+  (`NetbiosOptions=2`), WPAD (`AutoDetect=0` y `DisableWpad=1`) y SMBv1
+  (servidor y cliente `mrxsmb10`). Guarda el estado original en
+  `network-hardening.state.json` y se revierte con `-Undo`; `-DryRun` muestra
+  el estado sin tocar nada.
+- **Instalación para principiantes (`docs/INSTALACION-FACIL.md`)**: guía paso a
+  paso para quien nunca ha usado GitHub, PowerShell ni Tor, con enlaces de
+  descarga, avisos de SmartScreen y solución de problemas básicos.
+- **Instalador de doble clic (`INSTALAR.cmd`)**: se eleva solo, prepara el
+  usuario creado en el asistente de AdGuard Home, genera `config\.env`,
+  descarga Node portable si falta, aplica la configuración y arranca los
+  servicios. Incluye `COMPROBAR.cmd` y `DESINSTALAR.cmd` para el día a día.
+- **Comprobación 22 de la suite**: verifica LLMNR, WPAD, NetBIOS y SMBv1.
+
+### Cambiado
+
+- **Instalador**: nuevo modificador `-SkipNetworkHardening`; el endurecimiento
+  de red se aplica después de la privacidad del navegador.
+- **Desinstalador**: revierte el endurecimiento de red y borra su estado con
+  `-RemoveData`.
+- **Suite de pruebas**: pasa de 21 a 22 comprobaciones.
+- **Versión del paquete**: `2.0.3`.
+
+### Notas de migración
+
+- NetBIOS y SMBv1 pueden requerir reinicio para que el cambio sea completo.
+  Desactivar SMBv1 rompe equipos muy antiguos (Windows XP/2003 y algunos NAS):
+  usa `harden-network-protocols.ps1 -Undo` para volver atrás.
+
 ## [2.0.2] - 2026-11-25
 
 Cierre de la deuda operativa de la 2.0.1 y salto de la Fase 5: la fortaleza ya
@@ -67,17 +105,7 @@ no depende de un resolutor de terceros y resiste mejor la manipulacion local.
 - La release `v2.0.0` debe borrarse a mano en GitHub (`gh release delete v2.0.0`);
   requiere permisos del repositorio y no se automatiza desde el workflow.
 
-## [Unreleased]
 
-### Añadido
-
-- **Instalación para principiantes (`docs/INSTALACION-FACIL.md`)**: guía paso a
-  paso para quien nunca ha usado GitHub, PowerShell ni Tor, con enlaces de
-  descarga, avisos de SmartScreen y solución de problemas básicos.
-- **Instalador de doble clic (`INSTALAR.cmd`)**: se eleva solo, prepara el
-  usuario creado en el asistente de AdGuard Home, genera `config\.env`,
-  descarga Node portable si falta, aplica la configuración y arranca los
-  servicios. Incluye `COMPROBAR.cmd` y `DESINSTALAR.cmd` para el día a día.
 - **Preparación de credenciales (`scripts/preparar-config-inicial.ps1`)**: toma
   el hash bcrypt que crea el asistente de AdGuard Home y lo inyecta en la
   plantilla endurecida, sin pedir al usuario que edite YAML ni genere hashes.

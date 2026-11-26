@@ -86,6 +86,7 @@ flowchart TD
 | **🌱 Resolutor recursivo propio (Unbound)** | Perfil `privacy`: resuelve desde la raíz con validación DNSSEC local, sin delegar en Quad9/Cloudflare. Ningún tercero ve el patrón de consultas. |
 | **🔐 Capa anti-manipulación** | ACL de solo lectura, recuperación automática de servicios, watchdog con repetición cada 5 min, guardián cada 10 min y manifiesto SHA256 de los scripts. |
 | **🕵️ Privacidad del navegador** | Firefox con fingerprint uniforme (zona horaria UTC, idioma en-US) y cookies aisladas; Chrome/Edge sin cookies de terceros ni WebRTC directo. |
+| **🔗 Endurecimiento de protocolos locales** | Desactiva LLMNR, NetBIOS sobre TCP/IP, WPAD y SMBv1 (servidor y cliente), cerrando el envenenamiento de nombres y el relevo NTLM en la LAN. Reversible con `-Undo`. |
 | **🪟 Perfiles por edición de Windows** | Detecta Home, Pro, Education o Enterprise y aplica solo el hardening que esa edición soporta, sin romper el núcleo DNS/Tor. |
 
 ---
@@ -164,9 +165,10 @@ El instalador:
 * Detecta Windows Home/Pro/Education/Enterprise y aplica el hardening que permite cada edición.
 * Aplica el perfil DNS elegido (`-Profile speed|privacy|censorship`); `privacy` despliega Unbound recursivo.
 * Uniforma el fingerprint del navegador y aísla cookies (`harden-browser-privacy.ps1`).
+* Desactiva LLMNR, NetBIOS sobre TCP/IP, WPAD y SMBv1 (`harden-network-protocols.ps1`).
 * Blinda scripts, servicios y tareas contra manipulación (`protect-fortress.ps1`).
 * Registra el Watchdog con repetición cada 5 minutos y su guardián cada 10.
-* Ejecuta la suite de verificación de 21 comprobaciones.
+* Ejecuta la suite de verificación de 22 comprobaciones.
 
 Perfil recursivo propio (opcional, recomendado para máxima privacidad):
 
@@ -222,9 +224,10 @@ Salida esperada:
 [19] Watchdog con repeticion y guardian anti-manipulacion registrados... OK
 [20] Directorio protegido y servicios con recuperacion automatica... OK
 [21] Integridad de scripts y puertos sensibles cerrados al exterior... OK
+[22] LLMNR, NetBIOS, WPAD y SMBv1 desactivados (red local)... OK
 
 ==========================================================
-   ✅ TODAS LAS PRUEBAS SUPERADAS (21/21): FORTALEZA 100% ACTIVA
+   ✅ TODAS LAS PRUEBAS SUPERADAS (22/22): FORTALEZA 100% ACTIVA
 ==========================================================
 ```
 
@@ -267,7 +270,8 @@ adguardhome-tor-dns-fortress/
 │   ├── protect-fortress.ps1         # ACL, servicios, watchdog, firewall, integridad
 │   ├── watchdog-guard.ps1           # Resucita el watchdog y repara reglas/servicios
 │   ├── integrity-check.ps1          # Manifiesto SHA256 y restauración
-│   └── harden-browser-privacy.ps1   # Fingerprint uniforme y cookies aisladas
+│   ├── harden-browser-privacy.ps1   # Fingerprint uniforme y cookies aisladas
+│   └── harden-network-protocols.ps1 # LLMNR/NetBIOS/WPAD/SMBv1 desactivados
 ├── launchers/
 │   ├── start_watchdog.vbs           # Lanzador silencioso en segundo plano para Watchdog
 │   ├── start_ai_guard.vbs           # Lanzador silencioso para Centinela AI
@@ -351,7 +355,7 @@ viven en el README, en `docs/` y en las releases de GitHub.
 |---|---|---|
 | 1. Profesionalización | CI real (PowerShell, Node, config, secretos, docs), plantillas de issues y PR, `NOTICE`, `docs/LIMITS.md` | ✅ |
 | 2. Correcciones de producción | Failsafe de red, ACL de `config/.env`, Node portable con SHA256, lanzadores `.cmd`/`.vbs` y watchdog sin bucles | ✅ |
-| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 21 pruebas | ✅ |
+| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 22 pruebas | ✅ |
 | 4. Operación | Desinstalador con rollback, tests sin red, `-DryRun` en el instalador, perfil Docker/Linux | ✅ |
 | 5. Independencia y protección | Unbound recursivo, perfiles DNS, capa anti-manipulación, integridad SHA256 y privacidad del navegador | ✅ |
 

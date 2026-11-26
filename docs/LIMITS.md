@@ -81,6 +81,9 @@ palabra. Esta fortaleza protege la **capa DNS**, no sustituye un EDR.
   servicios, watchdog con repetición cada 5 minutos, guardián cada 10 minutos,
   reglas entrantes y manifiesto SHA256 con restauración. Sube el coste y cierra
   las vías triviales; no detiene a un atacante con control total del kernel.
+- `scripts/harden-network-protocols.ps1` desactiva LLMNR, NetBIOS sobre TCP/IP,
+  WPAD y SMBv1: cierra el envenenamiento de nombres y el relevo NTLM en la LAN.
+  No inspecciona el tráfico de la red ni protege si el router está comprometido.
 - Lo que sí aporta el núcleo: el centinela detecta DGA y beaconing, y el failsafe
   evita que una caída te deje sin red.
 

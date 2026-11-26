@@ -22,7 +22,8 @@ param(
     [string]$Profile = 'speed',
     [switch]$SkipUnbound = $false,
     [switch]$SkipProtection = $false,
-    [switch]$SkipBrowserPrivacy = $false
+    [switch]$SkipBrowserPrivacy = $false,
+    [switch]$SkipNetworkHardening = $false
 )
 
 # Ensure script is running as Administrator
@@ -65,10 +66,11 @@ if ($DryRun) {
     Write-Host "  7. Registrar tareas: watchdog (boot) y failsafe (cada 2 min)"
     Write-Host "  8. Restringir la ACL de config\.env"
     Write-Host "  9. Desactivar el DoH propio de Chrome/Edge/Firefox y uniformar el fingerprint"
-    Write-Host " 10. Aplicar el hardening adicional de la edicion Windows"
-    Write-Host " 11. Desplegar el perfil DNS ($Profile); privacy instala Unbound recursivo"
-    Write-Host " 12. Aplicar la capa anti-manipulacion (ACL, servicios, guardian, integridad)"
-    Write-Host " 13. Ejecutar scripts/test_fortress.ps1"
+    Write-Host " 10. Endurecer LLMNR, NetBIOS, WPAD y SMBv1 (red local)"
+    Write-Host " 11. Aplicar el hardening adicional de la edicion Windows"
+    Write-Host " 12. Desplegar el perfil DNS ($Profile); privacy instala Unbound recursivo"
+    Write-Host " 13. Aplicar la capa anti-manipulacion (ACL, servicios, guardian, integridad)"
+    Write-Host " 14. Ejecutar scripts/test_fortress.ps1"
     if ($fortressProfile) {
         Write-Host ""
         Write-Host ("  Perfil detectado: {0}" -f $fortressProfile.Summary) -ForegroundColor Cyan
@@ -160,6 +162,7 @@ $scriptsToCopy = @(
     "harden-env-acl.ps1",
     "harden-browser-doh.ps1",
     "harden-browser-privacy.ps1",
+    "harden-network-protocols.ps1",
     "setup-unbound.ps1",
     "apply-dns-profile.ps1",
     "protect-fortress.ps1",
@@ -286,6 +289,19 @@ if (-not $SkipBrowserPrivacy) {
     if (Test-Path $privacyScript) {
         & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $privacyScript
         Write-Host "  -> Fingerprint uniforme y cookies aisladas (Firefox/Chrome/Edge)." -ForegroundColor Green
+    }
+}
+
+if (-not $SkipNetworkHardening) {
+    $networkScript = Join-Path $TargetDir "harden-network-protocols.ps1"
+    if (Test-Path $networkScript) {
+        Write-Host "[5.65/6] Endureciendo protocolos de red local (LLMNR, NetBIOS, WPAD, SMBv1)..." -ForegroundColor Yellow
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $networkScript -TargetDir $TargetDir
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "  -> El endurecimiento de red devolvio un aviso; revisa los mensajes."
+        } else {
+            Write-Host "  -> LLMNR, NetBIOS, WPAD y SMBv1 desactivados (reversible con -Undo)." -ForegroundColor Green
+        }
     }
 }
 

@@ -75,6 +75,9 @@ y el mismo checksum que el automático, y solo existe una release publicada.
       Quad9/Cloudflare. Conmutador `-Profile privacy|speed|censorship` en el
       instalador; `privacy` activa `unbound` local, `speed` mantiene DoH paralelo.
       **Adelantado a 2.0.2.**
+- [x] **Endurecimiento de protocolos locales**: LLMNR, NetBIOS sobre TCP/IP,
+      WPAD y SMBv1 desactivados con estado reversible y `-Undo`.
+      **Adelantado a 2.0.3.**
 - [ ] **Bridges asistidos**: script que detecte bloqueo de Tor (timeout de
       bootstrap) y ofrezca obfs4/snowflake con `--verify-config` antes de aplicar.
 - [ ] **Rotación de upstream verificada**: antes de cambiar de resolutor, probar
@@ -110,7 +113,7 @@ conexión saliente (verificable en `Get-NetTCPConnection`).
 - [ ] **Instalador idempotente**: ejecutarlo dos veces no duplica tareas, reglas
       ni lanzadores (test automático sobre una VM limpia).
 - [ ] **Integración en VM**: imagen de Windows en CI que instala la fortaleza,
-      ejecuta la suite de 21 comprobaciones y publica el resultado.
+      ejecuta la suite de 22 comprobaciones y publica el resultado.
 - [ ] Tests del perfil Docker con `docker compose config` en CI (sin levantar
       contenedores) y validación de `AdGuardHome.yaml` con el binario real.
 

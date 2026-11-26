@@ -5,9 +5,9 @@
 > workflow calcula `# Fortaleza DNS <tag>` y lo antepone, así que una release
 > nueva nunca hereda el número de la anterior.
 
-Cierre de la deuda operativa de la 2.0.1 y salto de la Fase 5. **No se elimina
-nada de 2.0.x**: el perfil por defecto sigue siendo `speed` y la migración es
-opcional.
+Base 2.0.2 (resolutor recursivo, perfiles DNS y capa anti-manipulación) más el
+parche de seguridad de protocolos locales. **No se elimina nada de 2.0.x**: el
+perfil por defecto sigue siendo `speed` y la migración es opcional.
 
 ## Lo más importante
 
@@ -25,11 +25,14 @@ opcional.
 - **Privacidad del navegador**: Firefox con fingerprint uniforme (zona horaria
   UTC, idioma en-US), cookies aisladas y WebRTC desactivado; Chrome/Edge sin
   cookies de terceros ni WebRTC directo. Reversible.
+- **Protocolos locales endurecidos**: LLMNR, NetBIOS sobre TCP/IP, WPAD y
+  SMBv1 (servidor y cliente) desactivados, con estado reversible y `-Undo`.
+  Cierra el envenenamiento de nombres y el relevo NTLM en la LAN.
 - **Release 2.0.2 fiable**: `workflow_dispatch` exige tag existente, hace
   checkout exacto, rechaza ramas, calcula el título y verifica que el ZIP
   contiene todos los ficheros versionados. Un job de CI repite esa comparación
   en cada push.
-- **Suite de 21 comprobaciones**.
+- **Suite de 22 comprobaciones**.
 
 ## Instalación
 
@@ -57,14 +60,16 @@ powershell -ExecutionPolicy Bypass -File scripts\apply-dns-profile.ps1 `
 
 Para volver al perfil DoH: `apply-dns-profile.ps1 -Profile speed -Restart`.
 
-## Actualización desde 2.0.1
+## Actualización desde 2.0.1 / 2.0.2
 
 1. Copia `config/.env` (no lo pierdas).
 2. Ejecuta el instalador; conserva `AdGuardHome.yaml` existente salvo `-Force`.
 3. Añade `DNS_PROFILE=speed` a tu `.env` (o deja que lo escriba el perfil).
 4. Ejecuta `scripts\protect-fortress.ps1` para aplicar ACL, guardián y
    manifiesto de integridad.
-5. Reinicia y comprueba con la suite de 21 puntos.
+5. Reinicia y comprueba con la suite de 22 puntos.
+6. Si actualizas desde 2.0.2, ejecuta `scripts\harden-network-protocols.ps1`
+   (el instalador ya lo hace).
 
 ## Verificación del paquete
 
@@ -79,6 +84,8 @@ Get-Content .\SHA256SUMS
 
 ## Historial de empaquetado
 
+- **2.0.3** — parche de seguridad de protocolos locales (LLMNR, NetBIOS, WPAD
+  y SMBv1) con reversión y comprobación 22 de la suite.
 - **2.0.2** — release manual validada por tag, cuerpo calculado, ZIP comparado
   con el árbol versionado y deuda de la 2.0.1 cerrada (salvo borrar `v2.0.0`,
   que exige permisos del repositorio).

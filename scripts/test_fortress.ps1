@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# 🛡️ Fortress Verification & Health Diagnostics Suite (21-Point Audit)
+# 🛡️ Fortress Verification & Health Diagnostics Suite (22-Point Audit)
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # ==============================================================================
@@ -392,6 +392,42 @@ Assert-Check "Integridad de scripts y puertos sensibles cerrados al exterior" {
         return "WARN"
     }
     return $true
+}
+
+# 22. Endurecimiento de protocolos de red local (LLMNR/NetBIOS/WPAD/SMBv1)
+Assert-Check "LLMNR, NetBIOS, WPAD y SMBv1 desactivados (red local)" {
+    $issues = @()
+
+    $llmnr = $null
+    $llmnrKey = Get-Item -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -ErrorAction SilentlyContinue
+    if ($llmnrKey -and ($llmnrKey.GetValueNames() -contains 'EnableMulticast')) { $llmnr = [int]$llmnrKey.GetValue('EnableMulticast') }
+    if ($llmnr -ne 0) { $issues += 'LLMNR' }
+
+    $wpadUser = $null
+    $wpadUserKey = Get-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue
+    if ($wpadUserKey -and ($wpadUserKey.GetValueNames() -contains 'AutoDetect')) { $wpadUser = [int]$wpadUserKey.GetValue('AutoDetect') }
+    $wpadMachine = $null
+    $wpadMachineKey = Get-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp' -ErrorAction SilentlyContinue
+    if ($wpadMachineKey -and ($wpadMachineKey.GetValueNames() -contains 'DisableWpad')) { $wpadMachine = [int]$wpadMachineKey.GetValue('DisableWpad') }
+    if (($wpadUser -ne 0) -or ($wpadMachine -ne 1)) { $issues += 'WPAD' }
+
+    $nics22 = @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=TRUE' -ErrorAction SilentlyContinue | Where-Object { $_.SettingID })
+    $nbPending = @($nics22 | Where-Object { $null -eq $_.TcpipNetbiosOptions -or [int]$_.TcpipNetbiosOptions -ne 2 })
+    if ($nbPending.Count -gt 0) { $issues += ('NetBIOS ({0}/{1})' -f $nbPending.Count, $nics22.Count) }
+
+    try {
+        $smbCfg = Get-SmbServerConfiguration -ErrorAction Stop
+        if ($smbCfg.EnableSMB1Protocol) { $issues += 'SMBv1 servidor' }
+    } catch { }
+
+    $smbStart = $null
+    $smbKey = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10' -ErrorAction SilentlyContinue
+    if ($smbKey -and ($smbKey.GetValueNames() -contains 'Start')) { $smbStart = [int]$smbKey.GetValue('Start') }
+    if (($null -ne $smbStart) -and ([int]$smbStart -ne 4)) { $issues += 'SMBv1 cliente' }
+
+    if ($issues.Count -eq 0) { return $true }
+    Write-Host (" (pendiente: {0} -> scripts\harden-network-protocols.ps1) " -f ($issues -join ', ')) -NoNewline -ForegroundColor Yellow
+    return "WARN"
 }
 
 Write-Host ""
