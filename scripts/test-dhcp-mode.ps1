@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Continue'
 $dir = 'C:\AdGuardHome'
 $log = Join-Path $dir 'data\dhcp-mode-20261128.txt'
 $iface = 14
+$router = '192.168.0.1'
 $tasks = @('AdGuardHome_DNS_Failsafe', 'AdGuardHome_Fortress_Guard', 'AdGuardHome_Fortress_Watchdog')
 $rules = @('AdGuard_Block_Outbound_DNS_UDP', 'AdGuard_Block_Outbound_DNS_TCP')
 $origRules = @{}
@@ -57,12 +58,12 @@ try {
     L ('DNS tras DHCP: ' + (($dns | Where-Object { $_ }) -join ','))
 
     L 'Sonda TCP 53 al router.'
-    $tcp = Test-NetConnection -ComputerName '192.168.0.1' -Port 53 -InformationLevel Quiet -WarningAction SilentlyContinue
+    $tcp = Test-NetConnection -ComputerName $router -Port 53 -InformationLevel Quiet -WarningAction SilentlyContinue
     L ('TCP 53 router: ' + $tcp)
 
-    L 'Resolucion al router 192.168.0.1.'
+    L ('Resolucion al router ' + $router + '.')
     try {
-        $rr = Resolve-DnsName -Name 'example.com' -Server '192.168.0.1' -DnsOnly -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } | Select-Object -First 1
+        $rr = Resolve-DnsName -Name 'example.com' -Server $router -DnsOnly -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } | Select-Object -First 1
         L ('Router A: ' + $rr.IPAddress)
     } catch { L ('Router ERROR: ' + $_.Exception.Message) }
 
