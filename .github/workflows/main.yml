@@ -95,6 +95,7 @@ jobs:
           unzip -Z1 dist/test.zip \
             | sed 's#^fortress-test/##' \
             | grep -v '/$' \
+            | grep -v '^$' \
             | sort > dist/actual.txt
           if ! diff -u dist/expected.txt dist/actual.txt; then
             echo '::error::git archive no incluye exactamente los ficheros versionados.'

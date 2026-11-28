@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Prueba controlada del modo DHCP (2026-11-28)
 # - Pausa failsafe/guard/watchdog para que no reimpongan 127.0.0.1.
 # - Desactiva SOLO las reglas de DNS 53 (UDP/TCP) durante la prueba.

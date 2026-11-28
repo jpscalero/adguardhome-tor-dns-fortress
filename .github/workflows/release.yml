@@ -62,6 +62,7 @@ jobs:
           unzip -Z1 "dist/fortress-${VER}.zip" \
             | sed "s#^fortress-${VER}/##" \
             | grep -v '/$' \
+            | grep -v '^$' \
             | sort > dist/actual.txt
           if ! diff -u dist/expected.txt dist/actual.txt; then
             echo "::error::El ZIP no coincide con los ficheros versionados del tag."

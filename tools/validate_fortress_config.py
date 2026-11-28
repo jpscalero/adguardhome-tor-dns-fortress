@@ -86,7 +86,13 @@ def validate_fortress() -> None:
             continue
         # El perfil privacy usa el recursivo propio en loopback: no hay tercero
         # al que cifrar y el trafico no sale del equipo hasta la raiz DNS.
-        is_loopback_recursive = up_str.startswith("127.0.0.1:5335") or up_str.startswith("[::1]:5335")
+        # 5335 es Unbound; 5336 es el puente DoH/Tor local (fail-closed).
+        is_loopback_recursive = (
+            up_str.startswith("127.0.0.1:5335")
+            or up_str.startswith("[::1]:5335")
+            or up_str.startswith("127.0.0.1:5336")
+            or up_str.startswith("[::1]:5336")
+        )
         check(
             up_str.startswith("https://")
             or up_str.startswith("tls://")
