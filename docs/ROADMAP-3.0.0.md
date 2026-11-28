@@ -113,7 +113,7 @@ conexión saliente (verificable en `Get-NetTCPConnection`).
 - [ ] **Instalador idempotente**: ejecutarlo dos veces no duplica tareas, reglas
       ni lanzadores (test automático sobre una VM limpia).
 - [ ] **Integración en VM**: imagen de Windows en CI que instala la fortaleza,
-      ejecuta la suite de 22 comprobaciones y publica el resultado.
+      ejecuta la suite de 23 comprobaciones y publica el resultado.
 - [ ] Tests del perfil Docker con `docker compose config` en CI (sin levantar
       contenedores) y validación de `AdGuardHome.yaml` con el binario real.
 

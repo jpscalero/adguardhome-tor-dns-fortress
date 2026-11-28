@@ -19,17 +19,17 @@ quién eres.
 
 ## 2. El resolutor DoH ve tus consultas
 
-Con `9.9.9.9` (Quad9), `1.1.1.1` (Cloudflare) o `94.140.14.14` (AdGuard DNS)
-estás delegando la confidencialidad DNS en terceros. La ventaja es que **no ven
-tu IP real** (van por Tor); la desventaja es que ven el dominio consultado y
-pueden correlacionar patrones entre sesiones.
+El perfil por defecto `tor` envía el DNS a **Quad9** por DoH a través del
+puente local y de Tor. Quad9 no ve tu IP real, pero sí el dominio consultado y
+puede correlacionar patrones entre sesiones. El puente no resuelve nombres
+fuera de Tor ni usa fallback directo: si cae, el DNS falla cerrado.
 
 - Mitigación: perfil `privacy` con **Unbound recursivo propio**
   (`scripts/setup-unbound.ps1` + `scripts/apply-dns-profile.ps1`), que resuelve
   desde la raíz con DNSSEC local y no delega en nadie. También `.onion` por
-  `DNSPort` (sin terceros) y rotación periódica de upstream en perfiles DoH.
+  `DNSPort` (sin terceros).
 - Coste del perfil recursivo: más latencia en caché fría y dependencia de que
-  el puerto 53 saliente funcione. El perfil `speed` sigue disponible.
+  el puerto 53 saliente funcione. El perfil `tor` sigue disponible.
 
 ## 3. El centinela AI envía dominios a Google (modo `full`)
 
@@ -50,9 +50,10 @@ compromiso más grande del diseño y por eso existe `AI_MODE`:
 ## 4. DNSSEC depende del upstream
 
 `enable_dnssec: true` hace que AdGuard Home marque como fallidas las respuestas
-sin validación válida, pero **la validación la hace el resolutor de arriba**. Si
-el upstream no valida (o valida mal), tú no lo notas. Comprobación incluida:
-`dnssec-failed.org` debe ser rechazado.
+sin validación válida, pero **la validación la hace el resolutor de arriba**. En
+el perfil `tor` valida Quad9; el puente solo reenvía el bit DO y las respuestas
+sin tocarlas. Si el upstream no valida (o valida mal), tú no lo notas.
+Comprobación incluida: `dnssec-failed.org` debe ser rechazado.
 
 ## 5. Fugas que la fortaleza no controla
 

@@ -59,7 +59,10 @@ $inboundRules = @(
     'AdGuard_Block_Inbound_SOCKS_9050',
     'AdGuard_Block_Inbound_TorControl_9051',
     'AdGuard_Block_Inbound_DNSPort_5350',
-    'AdGuard_Block_Inbound_Unbound_5335'
+    'AdGuard_Block_Inbound_Unbound_5335',
+    'AdGuard_Block_Inbound_Unbound_5335_UDP',
+    'AdGuard_Block_Inbound_DoHBridge_5336',
+    'AdGuard_Block_Inbound_DoHBridge_5336_UDP'
 )
 
 function Write-Step {
@@ -201,7 +204,8 @@ if (-not $DryRun) {
         @{ Name = 'AdGuard_Block_Inbound_SOCKS_9050'; Display = 'AdGuard - Block inbound Tor SOCKS 9050'; Protocol = 'TCP'; Port = 9050 },
         @{ Name = 'AdGuard_Block_Inbound_TorControl_9051'; Display = 'AdGuard - Block inbound Tor control 9051'; Protocol = 'TCP'; Port = 9051 },
         @{ Name = 'AdGuard_Block_Inbound_DNSPort_5350'; Display = 'AdGuard - Block inbound Tor DNSPort 5350'; Protocol = 'TCP'; Port = 5350 },
-        @{ Name = 'AdGuard_Block_Inbound_Unbound_5335'; Display = 'AdGuard - Block inbound Unbound 5335'; Protocol = 'TCP'; Port = 5335 }
+        @{ Name = 'AdGuard_Block_Inbound_Unbound_5335'; Display = 'AdGuard - Block inbound Unbound 5335'; Protocol = 'TCP'; Port = 5335 },
+        @{ Name = 'AdGuard_Block_Inbound_DoHBridge_5336'; Display = 'AdGuard - Block inbound DoH bridge 5336'; Protocol = 'TCP'; Port = 5336 }
     )
     foreach ($r in $rules) {
         if (-not (Get-NetFirewallRule -Name $r.Name -ErrorAction SilentlyContinue)) {
@@ -209,6 +213,7 @@ if (-not $DryRun) {
         }
     }
     New-NetFirewallRule -Name 'AdGuard_Block_Inbound_Unbound_5335_UDP' -DisplayName 'AdGuard - Block inbound Unbound 5335 UDP' -Direction Inbound -Action Block -Protocol UDP -LocalPort 5335 -Enabled True -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -Name 'AdGuard_Block_Inbound_DoHBridge_5336_UDP' -DisplayName 'AdGuard - Block inbound DoH bridge 5336 UDP' -Direction Inbound -Action Block -Protocol UDP -LocalPort 5336 -Enabled True -ErrorAction SilentlyContinue | Out-Null
 }
 Write-Host '  Reglas entrantes listas.' -ForegroundColor Green
 
@@ -225,7 +230,7 @@ if (Test-Path $integrity) {
 if (-not $DryRun) {
     $state = [ordered]@{
         protected_at = (Get-Date).ToUniversalTime().ToString('o')
-        version = '2.0.2'
+        version = '2.0.4'
         watchdog_task = $watchdogTask
         guard_task = $guardTask
         services = @('AdGuardHome', 'tor', 'GoodbyeDPI', 'unbound')

@@ -31,19 +31,20 @@ flowchart TD
     end
 
     subgraph AnonymityLayer ["🧅 Capa de Anonimización (Tor)"]
+        DoHBridge["🔌 Puente DoH/Tor (127.0.0.1:5336)"]
         TorProxy["🧅 Tor Service (127.0.0.1:9050 SOCKS5)"]
         OnionDNS["🧅 Tor DNS Resolver (127.0.0.1:5350)"]
     end
 
     subgraph Internet ["🌍 Red Externa (DNS-over-HTTPS)"]
-        Resolvers["🔒 Resolutores DoH en paralelo (vía Tor)<br/>• Quad9 (Suiza 🇨🇭)<br/>• Cloudflare<br/>• AdGuard DNS<br/>• Alternativas: Digitale Gesellschaft, Applied Privacy, Mullvad, DNS.SB"]
+        Resolvers["🔒 Quad9 DoH por el puente Tor<br/>• 9.9.9.9 / 149.112.112.112<br/>• DNSSEC validado por Quad9"]
         OnionNet["🧅 Red Tor (.onion Hidden Services)"]
     end
 
-    AGH -->|Cifrado SOCKS5 / DNS| TorProxy
+    AGH -->|DNS loopback 5336| DoHBridge
+    DoHBridge -->|SOCKS5 9050| TorProxy
     AGH -->|Consultas .onion| OnionDNS
-    TorProxy --> GDPI
-    GDPI -->|Túnel 3 Saltos Cifrados| Resolvers
+    TorProxy -->|Túnel 3 Saltos Cifrados| Resolvers
     OnionDNS --> OnionNet
 ```
 
@@ -71,12 +72,26 @@ flowchart TD
 
 ## Perfil recursivo propio (Fase 5)
 
-El perfil por defecto (`speed`) mantiene el diseño histórico: AdGuard Home envía
-DoH por el proxy SOCKS5 de Tor a Quad9, Cloudflare y AdGuard DNS. Eso oculta tu
-IP al resolutor, pero el resolutor sigue viendo el dominio y puede correlacionar
-patrones entre sesiones.
+El perfil por defecto (`tor`) usa un puente local para que AdGuard Home no abra
+conexiones DNS directas:
 
-El perfil `privacy` cierra esa dependencia:
+```text
+Aplicación -> 127.0.0.1:53 (AdGuard Home)
+           -> 127.0.0.1:5336 (doh-tor-bridge.js)
+           -> 127.0.0.1:9050 (Tor SOCKS5)
+           -> 9.9.9.9:443 (Quad9 DoH)
+```
+
+* `http_proxy` solo cubre el cliente HTTP de AdGuard (listas, actualizaciones);
+  `dnsproxy` no admite `socks5://` en upstreams. El puente es el que habla con
+  Tor; AdGuard solo usa loopback.
+* El puente valida el certificado TLS (`dns.quad9.net`), reenvía el bit DO y no
+  resuelve nombres fuera de Tor. Quad9 valida DNSSEC; `.onion` se queda en
+  `127.0.0.1:5350`.
+* Sin fallback directo: si el puente cae, el DNS falla cerrado. El watchdog y
+  la tarea `AdGuardHome_Fortress_DoHBridge` lo relanzan.
+
+El perfil `privacy` cierra la dependencia de Quad9:
 
 ```text
 Aplicación -> 127.0.0.1:53 (AdGuard Home)
@@ -94,7 +109,8 @@ Aplicación -> 127.0.0.1:53 (AdGuard Home)
   las consultas repetidas.
 * **Conmutación**: `scripts/apply-dns-profile.ps1` reescribe únicamente el
   bloque `FORTRESS-UPSTREAM`, valida con `AdGuardHome.exe --check-config` y
-  revierte si algo falla. `-Profile speed` vuelve al DoH.
+  revierte si algo falla. `-Profile tor` vuelve al puente DoH; `-Profile
+  privacy` usa Unbound en 5335.
 
 ## Capa anti-manipulación
 

@@ -78,6 +78,13 @@ function Test-UnboundPort {
     }
 }
 
+function Test-UnboundResolution {
+    param([string]$Name)
+    # Resolve-DnsName no tiene -Port en PowerShell 5.1; nslookup si acepta -port.
+    $out = & nslookup -port=5335 $Name 127.0.0.1 2>&1 | Out-String
+    return [bool]($out -match '(?m)^\s*Addresses:\s+\d{1,3}(\.\d{1,3}){3}')
+}
+
 function Remove-UnboundDeployment {
     if ($DryRun) {
         Write-Host '  DRY-RUN: se eliminarian tarea, servicio y configuracion de Unbound.' -ForegroundColor Cyan
@@ -306,20 +313,15 @@ if (-not $up) {
     exit 5
 }
 
-$resolution = Resolve-DnsName -Name 'example.com' -Server '127.0.0.1' -Port 5335 -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue
+$resolution = Test-UnboundResolution -Name 'example.com'
 if (-not $resolution) {
     Write-Error 'Unbound escucha pero no resolvio example.com (revisa salida 53/UDP y el ancla de confianza).'
     exit 5
 }
 Write-Host '  Resolucion recursiva correcta (example.com).' -ForegroundColor Green
 
-$dnssecOk = $true
-try {
-    $bogus = Resolve-DnsName -Name 'dnssec-failed.org' -Server '127.0.0.1' -Port 5335 -DnsOnly -QuickTimeout -ErrorAction Stop
-    if ($bogus) { $dnssecOk = $false }
-} catch {
-    $dnssecOk = $true
-}
+$bogus = Test-UnboundResolution -Name 'dnssec-failed.org'
+$dnssecOk = -not $bogus
 if ($dnssecOk) {
     Write-Host '  DNSSEC: dnssec-failed.org rechazado correctamente.' -ForegroundColor Green
 } else {

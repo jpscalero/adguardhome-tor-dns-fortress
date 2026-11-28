@@ -81,6 +81,7 @@ for (const ep of envPaths) {
 const AGH_USER = env.ADGUARD_USERNAME || process.env.ADGUARD_USERNAME || 'admin';
 const AGH_PASS = env.ADGUARD_PASSWORD || process.env.ADGUARD_PASSWORD;
 const GEMINI_KEY = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = env.GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
 
 // ─── Modo de privacidad del analisis (Fase 3) ───────────────────────────────
 // off       : cero llamadas externas; decide la heuristica local.
@@ -389,11 +390,12 @@ Reply with EXACTLY one word: "MALICIOUS" or "SAFE".`;
 
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_KEY}`,
+      path: `/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
+        'Content-Length': Buffer.byteLength(payload),
+        'x-goog-api-key': GEMINI_KEY
       },
       agent: httpsAgent,
       timeout: 15000
@@ -402,9 +404,14 @@ Reply with EXACTLY one word: "MALICIOUS" or "SAFE".`;
       res.on('data', chunk => data += chunk);
       res.on('aborted', () => {
         req.destroy();
-        safeResolve('SAFE');
+        safeResolve(heuristicVerdict(apexLabel, apexEntropy));
       });
       res.on('end', () => {
+        if (res.statusCode !== 200) {
+          log(`Gemini HTTP ${res.statusCode} (modelo ${GEMINI_MODEL}): ${String(data).slice(0, 300)}`);
+          safeResolve(heuristicVerdict(apexLabel, apexEntropy));
+          return;
+        }
         try {
           const json = JSON.parse(data);
           const answer = json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()?.toUpperCase() || 'SAFE';
@@ -414,7 +421,8 @@ Reply with EXACTLY one word: "MALICIOUS" or "SAFE".`;
             safeResolve('SAFE');
           }
         } catch (e) {
-          safeResolve('SAFE');
+          log(`Gemini respuesta invalida: ${e.message}`);
+          safeResolve(heuristicVerdict(apexLabel, apexEntropy));
         }
       });
       res.on('error', () => {
@@ -478,6 +486,7 @@ function detectBeaconing(times) {
 
 // ─── Main Scan Loop with Concurrency Lock ───────────────────────────────────
 let isScanning = false;
+let lastScanErrorAt = 0;
 
 async function scanRecentQueries() {
   if (isScanning) return;
@@ -563,7 +572,11 @@ async function scanRecentQueries() {
     pruneDomainQueryTimes();
     saveCache();
   } catch (e) {
-    log(`Aviso en escaneo: ${e.message}`);
+    const now = Date.now();
+    if (now - lastScanErrorAt > 300000) {
+      log(`Aviso en escaneo: ${e.message}`);
+      lastScanErrorAt = now;
+    }
   } finally {
     isScanning = false;
   }
@@ -578,6 +591,7 @@ function main() {
   log('🛡️ AI DNS Guard v2.2 (modo ' + AI_MODE + ' + DGA Apex + C2 Beaconing + Cloud Protect) activo.');
   log('   📁 Base: ' + BASE_DIR);
   log('   🔗 AdGuard Home: http://' + AGH_HOST + ':' + AGH_PORT);
+  log('   🤖 Modelo Gemini: ' + GEMINI_MODEL);
   log('   ⏱️  Intervalo de escaneo: ' + (SCAN_INTERVAL_MS / 1000) + 's');
   if (AI_MODE === 'aggregate') {
     log('   🔒 Privacidad: solo se envia un hash con sal del dominio (nunca el nombre).');

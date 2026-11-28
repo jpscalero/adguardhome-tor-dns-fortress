@@ -4,6 +4,66 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/), y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-11-28
+
+Verificación integral de la fortaleza en Windows 11 y corrección de los fallos
+que impedían el 23/23.
+
+### Añadido
+
+- **Verificación documentada (`docs/VERIFICACION-2026-11-28.md`)**: línea base
+  20/23, causas raíz, cambios, evidencia final 23/23 y límites conocidos.
+- **Sonda DNS robusta en la suite**: los tests 4, 5, 6 y 18 usan
+  `Test-FortressDnsQuery` con timeout, puerto y RCODE explícitos, en lugar de
+  `Resolve-DnsName -QuickTimeout`/`nslookup -port`.
+- **Reparación consolidada (`repair-system.ps1`)**: ACL, reglas inbound
+  3000/9050, tareas S4U, hardening, espera activa del DNS y manifiesto.
+- **Diagnóstico DHCP (`test-dhcp-mode.ps1`)**: mide DHCP con las reglas
+  temporalmente desactivadas y restaura siempre `127.0.0.1`.
+- **Tests endurecidos**: test 1/3 rechazan bindings fuera de loopback; test 2
+  exige confirmar `IsTor`; test 14 exige un failsafe activo; test 16 avisa si
+  falta el hash; test 19 avisa si watchdog/guardián están deshabilitados; test
+  21 avisa si falta `integrity-check.ps1`. La suite devuelve exit 1 con
+  cualquier FAILED/WARN; `repair-system.ps1` devuelve exit 1 si el DNS no queda
+  listo.
+
+### Cambiado
+
+- **Watchdog y guardián** se registran con el usuario actual en S4U/Highest, no
+  como SYSTEM, porque el `permcheck` de AdGuard elimina SYSTEM del ACL.
+- **`repair-system.ps1`** solo cambia el DNS del sistema con `-SetSystemDns`;
+  antes lo fijaba en `127.0.0.1` en cada ejecución.
+- **Instalador** copia `fortress-health.ps1`, `fortress-doctor.ps1`,
+  `dns-probe.js` y `set-adguard-upstreams.js`, y registra el watchdog con la
+  cuenta actual.
+- **Test 17** devuelve WARN si el DNS está en automático: es la activación
+  final pendiente, no un fallo de la fortaleza.
+
+### Corregido
+
+- **Heartbeat viejo (test 13)**: ACL de `watchdog.heartbeat` y tarea del
+  watchdog activa; heartbeat fresco en 10-22 s.
+- **Acceso denegado a `fortress.manifest.json` y
+  `edition-hardening.report.json` (test 21)**: ACL de lectura para Usuarios y
+  manifiesto regenerado (38 ficheros).
+- **NetBIOS pendiente (test 22)**: `network-hardening.state.json` con escritura
+  para Administradores; `harden-network-protocols.ps1` exit 0. Requiere
+  reinicio para efectividad total.
+
+### Notas
+
+- El DNS automático (DHCP) no resuelve mientras estén activas las reglas
+  `AdGuard_Block_Outbound_DNS_UDP/TCP` (Program=Any, RemotePort=53); el estado
+  funcional es `127.0.0.1` y `AdGuardHome_DNS_Failsafe` lo mantiene. No se debe
+  desactivar sin un plan alternativo.
+- La prueba DHCP controlada confirmó que el router `192.168.0.1` rechaza las
+  consultas DNS incluso con el firewall abierto; el usuario aprobó el estado
+  final `127.0.0.1`.
+- **Versión del paquete**: `2.0.4`.
+- Suite final: **23/23**. Publicado en la rama `main` de
+  `github.com/jpscalero/adguardhome-tor-dns-fortress` con el commit de la
+  versión 2.0.4. No se creó tag ni release automáticamente.
+
 ## [2.0.3] - 2026-11-26
 
 Parche de seguridad: cierra el descubrimiento de nombres y SMBv1, las vias
@@ -26,18 +86,43 @@ clasicas de envenenamiento y relevo de credenciales en redes locales.
   descarga Node portable si falta, aplica la configuración y arranca los
   servicios. Incluye `COMPROBAR.cmd` y `DESINSTALAR.cmd` para el día a día.
 - **Comprobación 22 de la suite**: verifica LLMNR, WPAD, NetBIOS y SMBv1.
+- **Puente DoH-over-Tor (`scripts/doh-tor-bridge.js`)**: escucha DNS en
+  `127.0.0.1:5336` (UDP/TCP) y lo envía a Quad9 por DoH a través de
+  `127.0.0.1:9050`, validando el certificado TLS y reenviando el bit DO.
+  AdGuard Home ya no abre conexiones DNS directas a Internet.
+- **Comprobación 23 de la suite**: verifica el puente, sus listeners y que
+  AdGuard no tenga conexiones establecidas directas a 53/443/853.
 
 ### Cambiado
 
 - **Instalador**: nuevo modificador `-SkipNetworkHardening`; el endurecimiento
-  de red se aplica después de la privacidad del navegador.
+  de red se aplica después de la privacidad del navegador. El perfil DNS por
+  defecto pasa a `tor` y registra la tarea `AdGuardHome_Fortress_DoHBridge`
+  con repetición cada 5 minutos. `-SkipUnbound` ya solo omite Unbound, no el
+  perfil DNS.
 - **Desinstalador**: revierte el endurecimiento de red y borra su estado con
   `-RemoveData`.
-- **Suite de pruebas**: pasa de 21 a 22 comprobaciones.
+- **Suite de pruebas**: pasa de 21 a 23 comprobaciones (22 red local, 23
+  puente DoH/Tor y fugas directas).
 - **Versión del paquete**: `2.0.3`.
+
+### Corregido
+
+- **Fuga DNS por `http_proxy`**: AdGuard Home solo aplica `http_proxy` a su
+  cliente HTTP. `dnsproxy` no admite `socks5://` en upstreams, así que los
+  DoH salían directos a Quad9/Cloudflare. Ahora los perfiles `tor`, `speed` y
+  `censorship` apuntan al puente local `127.0.0.1:5336`; el puente es el único
+  que habla con `127.0.0.1:9050`. Sin fallback directo: si el puente cae, el
+  DNS falla cerrado. DNSSEC se sigue validando en Quad9 y `.onion` en 5350.
+- **Bug `Resolve-DnsName -Port`**: PowerShell 5.1 no tiene ese parámetro. Las
+  comprobaciones de Unbound (`setup-unbound.ps1`) y de la suite ahora usan
+  `nslookup -port=...`, que además distingue la respuesta real del servidor.
 
 ### Notas de migración
 
+- La primera ejecución sobre un `AdGuardHome.yaml` anterior migra el bloque
+  DNS: conserva filtros, usuarios y resto de claves, crea respaldo y valida con
+  `--check-config`. Si el puente no escucha en 5336, el perfil no se aplica.
 - NetBIOS y SMBv1 pueden requerir reinicio para que el cambio sea completo.
   Desactivar SMBv1 rompe equipos muy antiguos (Windows XP/2003 y algunos NAS):
   usa `harden-network-protocols.ps1 -Undo` para volver atrás.

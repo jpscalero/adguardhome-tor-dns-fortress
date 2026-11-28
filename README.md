@@ -1,5 +1,7 @@
 # 🛡️ AdGuard Home + Tor DNS Privacy Fortress
 
+> **Versión actual: 2.0.4** — parche de verificación y cierre. Suite final 23/23.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows 11 / 10](https://img.shields.io/badge/Platform-Windows%2011%20%2F%2010-0078D6.svg)]()
 [![DNS: DoH + Tor + Unbound + DNSSEC](https://img.shields.io/badge/DNS-DoH%20%2B%20Tor%20%2B%20Unbound%20%2B%20DNSSEC-brightgreen.svg)]()
@@ -53,19 +55,20 @@ flowchart TD
     end
 
     subgraph AnonymityLayer ["🧅 Capa de Anonimización (Tor)"]
+        DoHBridge["🔌 Puente DoH/Tor (127.0.0.1:5336)"]
         TorProxy["🧅 Tor Service (127.0.0.1:9050 SOCKS5)"]
         OnionDNS["🧅 Tor DNS Resolver (127.0.0.1:5350)"]
     end
 
     subgraph Internet ["🌍 Red Externa (DNS-over-HTTPS)"]
-        Resolvers["🔒 Resolutores DoH en paralelo (vía Tor)<br/>• Quad9 (Suiza 🇨🇭)<br/>• Cloudflare<br/>• AdGuard DNS<br/>• Alternativas: Digitale Gesellschaft, Applied Privacy, Mullvad, DNS.SB"]
+        Resolvers["🔒 Quad9 DoH por el puente Tor<br/>• 9.9.9.9 / 149.112.112.112<br/>• DNSSEC validado por Quad9"]
         OnionNet["🧅 Red Tor (.onion Hidden Services)"]
     end
 
-    AGH -->|Cifrado SOCKS5 / DNS| TorProxy
+    AGH -->|DNS loopback 5336| DoHBridge
+    DoHBridge -->|SOCKS5 9050| TorProxy
     AGH -->|Consultas .onion| OnionDNS
-    TorProxy --> GDPI
-    GDPI -->|Túnel 3 Saltos Cifrados| Resolvers
+    TorProxy -->|Túnel 3 Saltos Cifrados| Resolvers
     OnionDNS --> OnionNet
 ```
 
@@ -75,8 +78,8 @@ flowchart TD
 
 | Módulo | Función y Beneficio |
 | :--- | :--- |
-| **🧅 Túnel Tor SOCKS5 Integral** | Todas las peticiones DoH viajan a través de 3 saltos cifrados por la red Tor. Tu ISP jamás ve a qué servidores DNS consultas ni los dominios que visitas. |
-| **🌍 Resolutores DoH en paralelo** | Consultas de carrera (`parallel mode`) a Quad9 (Suiza), Cloudflare y AdGuard DNS, con alternativas multijurisdiccionales documentadas (Digitale Gesellschaft, Applied Privacy, Mullvad, DNS.SB). |
+| **🧅 Túnel Tor SOCKS5 Integral** | AdGuard Home no habla con Internet: envía el DNS al puente local `127.0.0.1:5336`, que sale por Tor `127.0.0.1:9050` hacia Quad9 DoH. Tu ISP no ve los dominios ni el resolutor. |
+| **🌍 Quad9 DoH con DNSSEC** | El puente usa `9.9.9.9`/`149.112.112.112`, valida el certificado TLS y reenvía el bit DO. Quad9 valida DNSSEC; `.onion` sigue en el DNSPort de Tor. |
 | **⚡ Caché Optimista de Alta Velocidad** | 32 MB de RAM para más de 100.000 dominios. Respuestas instantáneas en 0 ms para dominios recurrentes, refrescando en segundo plano sin latencia de usuario. |
 | **🛡️ Evasión de DPI (GoodbyeDPI)** | Segmentación a nivel de kernel de paquetes TCP y ofuscación de SNI para eludir firewalls gubernamentales, inspección profunda del ISP y censura. |
 | **🛠️ Solución Nativa Puerto 53 Windows 11** | Incluye el script de arbitraje que neutraliza el secuestro de `0.0.0.0:53 UDP` por el servicio `SharedAccess` (ICS / Hyper-V Default Switch). |
@@ -163,12 +166,12 @@ El instalador:
 * Copia la plantilla de configuración blindada `AdGuardHome.template.yaml` si no existe una configuración previa.
 * Configura los adaptadores de red de Windows hacia `127.0.0.1`, incluido Ethernet.
 * Detecta Windows Home/Pro/Education/Enterprise y aplica el hardening que permite cada edición.
-* Aplica el perfil DNS elegido (`-Profile speed|privacy|censorship`); `privacy` despliega Unbound recursivo.
+* Aplica el perfil DNS elegido (`-Profile tor|speed|censorship|privacy`); `tor` registra el puente DoH/Tor y `privacy` despliega Unbound recursivo.
 * Uniforma el fingerprint del navegador y aísla cookies (`harden-browser-privacy.ps1`).
 * Desactiva LLMNR, NetBIOS sobre TCP/IP, WPAD y SMBv1 (`harden-network-protocols.ps1`).
 * Blinda scripts, servicios y tareas contra manipulación (`protect-fortress.ps1`).
 * Registra el Watchdog con repetición cada 5 minutos y su guardián cada 10.
-* Ejecuta la suite de verificación de 22 comprobaciones.
+* Ejecuta la suite de verificación de 23 comprobaciones.
 
 Perfil recursivo propio (opcional, recomendado para máxima privacidad):
 
@@ -177,12 +180,12 @@ Perfil recursivo propio (opcional, recomendado para máxima privacidad):
 powershell -ExecutionPolicy Bypass -File scripts\setup-unbound.ps1 -PackagePath .\unbound-X.Y.Z.zip
 powershell -ExecutionPolicy Bypass -File scripts\apply-dns-profile.ps1 -Profile privacy -Restart
 
-# Volver al perfil DoH sobre Tor
-powershell -ExecutionPolicy Bypass -File scripts\apply-dns-profile.ps1 -Profile speed -Restart
+# Volver al perfil DoH sobre Tor (puente local 5336 -> 9050)
+powershell -ExecutionPolicy Bypass -File scripts\apply-dns-profile.ps1 -Profile tor -Restart
 ```
 
-El instalador también acepta `-Profile speed|privacy|censorship`; si eliges
-`privacy` sin haber desplegado Unbound, avisa y conserva `speed`.
+El instalador también acepta `-Profile tor|speed|privacy|censorship`; si eliges
+`privacy` sin haber desplegado Unbound, avisa y usa `tor`.
 
 ---
 
@@ -220,14 +223,15 @@ Salida esperada:
 [15] DoH del navegador desactivado por politica (Chrome/Edge)... OK
 [16] Integridad del binario de AdGuardHome (hash registrado)... OK
 [17] DNS real de Windows apunta a la fortaleza (127.0.0.1)... OK
-[18] Perfil DNS activo y resolutor recursivo propio (Unbound)... OK
+[18] Perfil DNS activo (puente DoH/Tor o Unbound)... OK
 [19] Watchdog con repeticion y guardian anti-manipulacion registrados... OK
 [20] Directorio protegido y servicios con recuperacion automatica... OK
 [21] Integridad de scripts y puertos sensibles cerrados al exterior... OK
 [22] LLMNR, NetBIOS, WPAD y SMBv1 desactivados (red local)... OK
+[23] Puente DoH/Tor activo y AdGuard sin conexiones DNS directas... OK
 
 ==========================================================
-   ✅ TODAS LAS PRUEBAS SUPERADAS (22/22): FORTALEZA 100% ACTIVA
+   ✅ TODAS LAS PRUEBAS SUPERADAS (23/23): FORTALEZA 100% ACTIVA
 ==========================================================
 ```
 
@@ -266,7 +270,8 @@ adguardhome-tor-dns-fortress/
 │   ├── ai_dns_guard.js              # Centinela AI de detección de amenazas y DGA
 │   ├── decoy_dns.js                 # Generador de tráfico señuelo y ofuscación
 │   ├── setup-unbound.ps1            # Instala el resolutor recursivo (hash verificado)
-│   ├── apply-dns-profile.ps1        # Perfiles privacy / speed / censorship
+│   ├── apply-dns-profile.ps1        # Perfiles tor / speed / censorship / privacy
+│   ├── doh-tor-bridge.js            # Puente DNS-over-HTTPS sobre SOCKS5/Tor
 │   ├── protect-fortress.ps1         # ACL, servicios, watchdog, firewall, integridad
 │   ├── watchdog-guard.ps1           # Resucita el watchdog y repara reglas/servicios
 │   ├── integrity-check.ps1          # Manifiesto SHA256 y restauración
@@ -355,7 +360,7 @@ viven en el README, en `docs/` y en las releases de GitHub.
 |---|---|---|
 | 1. Profesionalización | CI real (PowerShell, Node, config, secretos, docs), plantillas de issues y PR, `NOTICE`, `docs/LIMITS.md` | ✅ |
 | 2. Correcciones de producción | Failsafe de red, ACL de `config/.env`, Node portable con SHA256, lanzadores `.cmd`/`.vbs` y watchdog sin bucles | ✅ |
-| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 22 pruebas | ✅ |
+| 3. Privacidad y endurecimiento | `AI_MODE`, aislamiento de circuitos Tor, firewall 853/mDNS, DoH del navegador, suite de 23 pruebas | ✅ |
 | 4. Operación | Desinstalador con rollback, tests sin red, `-DryRun` en el instalador, perfil Docker/Linux | ✅ |
 | 5. Independencia y protección | Unbound recursivo, perfiles DNS, capa anti-manipulación, integridad SHA256 y privacidad del navegador | ✅ |
 
@@ -383,6 +388,15 @@ node --test tests/
 # Invariantes de configuración (YAML + garantías de privacidad)
 python tools/validate_fortress_config.py
 ```
+
+> **Verificación 2026-11-28:** se corrigieron el heartbeat/ACL del watchdog, el
+> acceso al manifiesto, el NetBIOS pendiente y la robustez de las pruebas DNS.
+> Resultado final: **23/23**. Informe completo, causas raíz y límites de DNS en
+> [docs/VERIFICACION-2026-11-28.md](docs/VERIFICACION-2026-11-28.md).
+>
+> Con las reglas anti-fuga actuales, el DNS automático (DHCP) no resuelve; el
+> estado funcional es `127.0.0.1` y el failsafe lo mantiene. No desactivar el
+> failsafe ni abrir el puerto 53 sin revisar el modelo de amenazas.
 
 ## 🆘 Si algo falla
 

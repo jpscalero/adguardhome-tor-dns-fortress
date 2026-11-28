@@ -60,7 +60,7 @@ if ($DryRun) {
 }
 
 # 1. Tareas programadas
-foreach ($task in @('AdGuardHome_Fortress_Watchdog', 'AdGuardHome_Fortress_Failsafe', 'AdGuardHome_Fortress_Guard', 'AdGuardHome_Unbound')) {
+foreach ($task in @('AdGuardHome_Fortress_Watchdog', 'AdGuardHome_Fortress_Failsafe', 'AdGuardHome_Fortress_Guard', 'AdGuardHome_Fortress_DoHBridge', 'AdGuardHome_Unbound')) {
     $existing = Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
     if (-not $existing) { continue }
     Step ("Eliminando tarea programada {0}" -f $task)
@@ -71,7 +71,7 @@ foreach ($task in @('AdGuardHome_Fortress_Watchdog', 'AdGuardHome_Fortress_Fails
 }
 
 # 2. Procesos node de la fortaleza
-foreach ($pattern in @('ai_dns_guard.js', 'decoy_dns.js')) {
+foreach ($pattern in @('ai_dns_guard.js', 'decoy_dns.js', 'doh-tor-bridge.js')) {
     $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -and $_.CommandLine -like ("*" + $pattern + "*") })
     foreach ($p in $procs) {
@@ -91,7 +91,9 @@ $rules = @(
     'AdGuard_Block_Inbound_TorControl_9051',
     'AdGuard_Block_Inbound_DNSPort_5350',
     'AdGuard_Block_Inbound_Unbound_5335',
-    'AdGuard_Block_Inbound_Unbound_5335_UDP'
+    'AdGuard_Block_Inbound_Unbound_5335_UDP',
+    'AdGuard_Block_Inbound_DoHBridge_5336',
+    'AdGuard_Block_Inbound_DoHBridge_5336_UDP'
 )
 foreach ($name in $rules) {
     if (-not (Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)) { continue }

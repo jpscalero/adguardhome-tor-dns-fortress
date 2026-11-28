@@ -61,7 +61,7 @@ function New-Manifest {
     }
     $manifest = [ordered]@{
         created_at = (Get-Date).ToUniversalTime().ToString('o')
-        version = '2.0.2'
+        version = '2.0.4'
         files = $entries
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8

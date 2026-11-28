@@ -1,11 +1,15 @@
 ﻿# ==============================================================================
-# 🛡️ Fortress Verification & Health Diagnostics Suite (22-Point Audit)
+# 🛡️ Fortress Verification & Health Diagnostics Suite (23-Point Audit)
 # Project: adguardhome-tor-dns-fortress
 # Author: jpscalero
 # ==============================================================================
 
 $consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
 if (Test-Path $consoleHelper) { . $consoleHelper }
+
+# Helper compartido: consultas DNS reales con timeout y puerto explicito.
+$healthHelper = Join-Path $PSScriptRoot 'fortress-health.ps1'
+if (Test-Path $healthHelper) { . $healthHelper }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "   🛡️ FORTRESS HEALTH & SECURITY DIAGNOSTIC SUITE        " -ForegroundColor Cyan
@@ -63,17 +67,24 @@ function Assert-Check {
 
 # 1. Port 53 UDP Binding Check
 Assert-Check "Puerto 53 UDP vinculado exclusivamente a AdGuard Home" {
-    $ep = Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" }
-    if ($ep) {
-        $proc = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
-        if ($proc -and $proc.ProcessName -eq "AdGuardHome") {
-            return $true
-        }
-        Write-Host " (Ocupado por PID $($ep.OwningProcess): $($proc.ProcessName) -> Revisa ICS/SharedAccess o dnscache) " -NoNewline -ForegroundColor Yellow
+    $all = @(Get-NetUDPEndpoint -LocalPort 53 -ErrorAction SilentlyContinue)
+    if ($all.Count -eq 0) {
+        Write-Host " (Puerto 53 UDP no está en escucha -> AdGuard Home no está iniciado) " -NoNewline -ForegroundColor Yellow
         return $false
     }
-    Write-Host " (Puerto 53 UDP no está en escucha -> AdGuard Home no está iniciado) " -NoNewline -ForegroundColor Yellow
-    return $false
+    $external = @($all | Where-Object { $_.LocalAddress -notin @('127.0.0.1', '::1') })
+    if ($external.Count -gt 0) {
+        Write-Host (" (expuesto en {0}; debe escuchar solo en loopback) " -f (($external | ForEach-Object { $_.LocalAddress }) -join ',')) -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    foreach ($ep in $all) {
+        $proc = Get-Process -Id $ep.OwningProcess -ErrorAction SilentlyContinue
+        if (-not $proc -or $proc.ProcessName -ne 'AdGuardHome') {
+            Write-Host " (PID $($ep.OwningProcess) no es AdGuardHome -> Revisa ICS/SharedAccess o dnscache) " -NoNewline -ForegroundColor Yellow
+            return $false
+        }
+    }
+    return $true
 }
 
 # 2. Tor SOCKS5 Port 9050 Check & Anonymity Verification
@@ -90,15 +101,23 @@ Assert-Check "Túnel Tor SOCKS5 en escucha y salida anónima (127.0.0.1:9050)" {
         $tcp.EndConnect($async)
         $tcp.Close()
 
-        # Test true Tor exit IP if curl is available
-        try {
-            $torApi = curl.exe -s --max-time 4 --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip 2>$null
-            if ($torApi -match '"IsTor"\s*:\s*true') {
-                Write-Host "(Exit IP confirmada) " -NoNewline -ForegroundColor Gray
-            }
-        } catch {}
-
-        return $true
+        # Confirmar salida Tor; no basta con que el puerto SOCKS5 acepte TCP.
+        # El primer circuito puede tardar: 3 intentos con timeout amplio.
+        $torConfirmed = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $torApi = curl.exe -s --max-time 15 --socks5-hostname 127.0.0.1:9050 https://check.torproject.org/api/ip 2>$null
+                if ($torApi -match '"IsTor"\s*:\s*true') {
+                    Write-Host "(Exit IP confirmada) " -NoNewline -ForegroundColor Gray
+                    $torConfirmed = $true
+                    break
+                }
+            } catch {}
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+        }
+        if ($torConfirmed) { return $true }
+        Write-Host " (SOCKS5 abierto, salida Tor no confirmada) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
     } catch {
         $tcp.Close()
         Write-Host " (Error al conectar a Tor 9050: $($_.Exception.Message)) " -NoNewline -ForegroundColor Yellow
@@ -108,8 +127,14 @@ Assert-Check "Túnel Tor SOCKS5 en escucha y salida anónima (127.0.0.1:9050)" {
 
 # 3. Tor DNSPort 5350 Check
 Assert-Check "Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)" {
-    $ep5350 = Get-NetUDPEndpoint -LocalPort 5350 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" }
-    if ($null -ne $ep5350) {
+    $all5350 = @(Get-NetUDPEndpoint -LocalPort 5350 -ErrorAction SilentlyContinue)
+    $ep5350 = @($all5350 | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+    $external5350 = @($all5350 | Where-Object { $_.LocalAddress -notin @('127.0.0.1', '::1') })
+    if ($external5350.Count -gt 0) {
+        Write-Host (" (DNSPort expuesto en {0}; debe escuchar solo en loopback) " -f (($external5350 | ForEach-Object { $_.LocalAddress }) -join ',')) -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    if ($ep5350.Count -gt 0) {
         return $true
     }
     Write-Host " (DNSPort 5350 no responde -> Verifica que torrc incluya 'DNSPort 127.0.0.1:5350') " -NoNewline -ForegroundColor Yellow
@@ -119,26 +144,25 @@ Assert-Check "Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)" {
 # 4. Standard DNS Live Resolution (github.com)
 Assert-Check "Resolución DNS local en 127.0.0.1:53 (github.com)" {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $res = Resolve-DnsName -Name "github.com" -Server "127.0.0.1" -QuickTimeout -DnsOnly -ErrorAction Stop
+    $r = Test-FortressDnsQuery -Name 'github.com' -Server '127.0.0.1' -Port 53 -TimeoutMs 12000
     $sw.Stop()
     Write-Host "($($sw.ElapsedMilliseconds)ms) " -NoNewline -ForegroundColor Gray
-    return ($null -ne $res -and $res.IPAddress.Length -gt 0)
+    if ($r.Success -and $r.Answers -gt 0) { return $true }
+    Write-Host " (fallo: $($r.Error)) " -NoNewline -ForegroundColor Yellow
+    return $false
 }
 
 # 5. Tor .onion Native Resolution Check
 Assert-Check "Resolución nativa de dominios Tor .onion (Virtual IP 10.x.x.x)" {
-    $out = nslookup 2gzyxa5ihm7nsggfxnu52r2g264425uzqm32my2tko6sqpnxuvjpageyd.onion 127.0.0.1 2>&1 | Out-String
-    return ($out -match '10\.\d{1,3}\.\d{1,3}\.\d{1,3}')
+    $r = Test-FortressDnsQuery -Name '2gzyxa5ihm7nsggfxnu52r2g264425uzqm32my2tko6sqpnxuvjpageyd.onion' -Server '127.0.0.1' -Port 53 -TimeoutMs 20000
+    return ($r.Success -and $r.Answers -gt 0)
 }
 
 # 6. Anti-Tracking / Canary Blocklist Check
 Assert-Check "Bloqueo activo de telemetría y dominios de riesgo (NXDOMAIN)" {
-    try {
-        $res = Resolve-DnsName -Name "use-application-dns.net" -Server "127.0.0.1" -QuickTimeout -DnsOnly -ErrorAction Stop
-        return $false # Should not resolve
-    } catch {
-        return $true # NXDOMAIN expected
-    }
+    $r = Test-FortressDnsQuery -Name 'use-application-dns.net' -Server '127.0.0.1' -Port 53 -TimeoutMs 12000
+    # Se considera bloqueado si AdGuard responde NXDOMAIN (RCODE 3).
+    return ($r.RCode -eq 3)
 }
 
 # 7. GoodbyeDPI Anti-Censorship Service Check
@@ -228,12 +252,30 @@ Assert-Check "Heartbeat del watchdog reciente (< 120 s)" {
     return ($age -lt 120)
 }
 
-# 14. Tarea programada del failsafe
-Assert-Check "Tarea programada del failsafe registrada" {
-    $t = Get-ScheduledTask -TaskName "AdGuardHome_Fortress_Failsafe" -ErrorAction SilentlyContinue
-    if ($t) { return $true }
-    Write-Host " (no registrada -> install_fortress.ps1 la crea) " -NoNewline -ForegroundColor Yellow
-    return "WARN"
+# 14. Tarea programada del failsafe (debe haber una activa, no solo registrada)
+Assert-Check "Tarea programada del failsafe activa" {
+    $names = @('AdGuardHome_DNS_Failsafe', 'AdGuardHome_Fortress_Failsafe')
+    $tasks = @($names | ForEach-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue })
+    if ($tasks.Count -eq 0) {
+        Write-Host " (ninguna registrada -> install_fortress.ps1) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $active = @($tasks | Where-Object { $_.State -ne 'Disabled' })
+    if ($active.Count -eq 0) {
+        Write-Host " (todas deshabilitadas; el DNS no se mantendria) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    $bad = @()
+    foreach ($t in $active) {
+        $info = Get-ScheduledTaskInfo -TaskName $t.TaskName -ErrorAction SilentlyContinue
+        if ($info -and $info.LastTaskResult -ne 0 -and $info.LastTaskResult -ne 267009) { $bad += $t.TaskName }
+    }
+    if ($bad.Count -gt 0) {
+        Write-Host (" (ultimo resultado con error: {0}) " -f ($bad -join ', ')) -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    Write-Host ("(activa: {0}) " -f (($active | ForEach-Object { $_.TaskName }) -join ', ')) -NoNewline -ForegroundColor Gray
+    return $true
 }
 
 # 15. DoH propio del navegador desactivado
@@ -260,8 +302,8 @@ Assert-Check "Integridad del binario de AdGuardHome (hash registrado)" {
             New-Item -ItemType Directory -Path (Split-Path $hashFile) -Force | Out-Null
             Set-Content -Path $hashFile -Value $current -Encoding ASCII
         } catch { }
-        Write-Host "(hash inicial registrado) " -NoNewline -ForegroundColor Gray
-        return $true
+        Write-Host "(hash inicial registrado; vuelve a ejecutar para verificar) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
     }
     $expected = (Get-Content $hashFile -Raw).Trim()
     if ($expected -eq $current) { return $true }
@@ -296,34 +338,47 @@ Assert-Check "DNS real de Windows apunta a la fortaleza (127.0.0.1)" {
         return $true
     }
 
+    # En modo de verificacion previa el DNS puede seguir en automatico. Eso no es
+    # un fallo, es la activacion final pendiente; no se debe forzar el cambio.
+    $onlyAutomatic = (($bad | Where-Object { $_ -notmatch '=automatico$' }).Count -eq 0)
+    if ($onlyAutomatic) {
+        Write-Host '(DNS en automatico; activacion final pendiente) ' -NoNewline -ForegroundColor Yellow
+        return 'WARN'
+    }
+
     Write-Host ('(DNS real no apunta a la fortaleza: {0}) ' -f ($bad -join '; ')) -NoNewline -ForegroundColor Yellow
     return $false
 }
 
-# 18. Perfil DNS activo (recursivo propio o DoH)
-Assert-Check "Perfil DNS activo y resolutor recursivo propio (Unbound)" {
+# 18. Perfil DNS activo (puente Tor o resolutor recursivo propio)
+Assert-Check "Perfil DNS activo (puente DoH/Tor o Unbound)" {
     $fortressDir18 = if ($env:FORTRESS_DIR) { $env:FORTRESS_DIR } else { 'C:\AdGuardHome' }
     $envFile18 = Join-Path $fortressDir18 'config\.env'
-    $profile = 'speed'
+    $profile = 'tor'
     if (Test-Path $envFile18) {
         $match = [regex]::Match((Get-Content $envFile18 -Raw), '(?m)^\s*DNS_PROFILE\s*=\s*(\w+)')
         if ($match.Success) { $profile = $match.Groups[1].Value.ToLowerInvariant() }
     }
-    if ($profile -ne 'privacy') {
-        Write-Host (" (perfil {0}; el recursivo se activa con -Profile privacy) " -f $profile) -NoNewline -ForegroundColor Yellow
-        return "WARN"
+    if ($profile -eq 'privacy') {
+        $port = 5335
+        $label = 'Unbound'
+    } else {
+        $port = 5336
+        $label = 'puente DoH/Tor'
     }
-    $ep = Get-NetUDPEndpoint -LocalPort 5335 -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq '127.0.0.1' }
+    $ep = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') }
     if (-not $ep) {
-        Write-Host " (perfil privacy pero Unbound no escucha en 5335 -> setup-unbound.ps1) " -NoNewline -ForegroundColor Yellow
+        Write-Host (" (perfil {0} pero {1} no escucha en {2}) " -f $profile, $label, $port) -NoNewline -ForegroundColor Yellow
         return $false
     }
-    $res = Resolve-DnsName -Name 'example.com' -Server '127.0.0.1' -Port 5335 -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue
-    if (-not $res) {
-        Write-Host " (Unbound escucha pero no resuelve) " -NoNewline -ForegroundColor Yellow
+    # nslookup no soporta -port en todas las versiones de Windows; se usa la sonda real.
+    $r = Test-FortressDnsQuery -Name 'example.com' -Server '127.0.0.1' -Port $port -TimeoutMs 10000
+    if (-not $r.Success) {
+        Write-Host (" ({0} escucha pero no resuelve example.com: {1}) " -f $label, $r.Error) -NoNewline -ForegroundColor Yellow
         return $false
     }
-    Write-Host "(recursivo 127.0.0.1:5335) " -NoNewline -ForegroundColor Gray
+    Write-Host ("({0} 127.0.0.1:{1}) " -f $label, $port) -NoNewline -ForegroundColor Gray
     return $true
 }
 
@@ -332,6 +387,10 @@ Assert-Check "Watchdog con repeticion y guardian anti-manipulacion registrados" 
     $wd = Get-ScheduledTask -TaskName 'AdGuardHome_Fortress_Watchdog' -ErrorAction SilentlyContinue
     $guard = Get-ScheduledTask -TaskName 'AdGuardHome_Fortress_Guard' -ErrorAction SilentlyContinue
     if ($wd -and $guard) {
+        if ($wd.State -eq 'Disabled' -or $guard.State -eq 'Disabled') {
+            Write-Host " (watchdog o guardian deshabilitado) " -NoNewline -ForegroundColor Yellow
+            return "WARN"
+        }
         $repetition = @($wd.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval })
         if ($repetition.Count -gt 0) { return $true }
         Write-Host " (watchdog sin trigger de repeticion -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
@@ -359,7 +418,7 @@ Assert-Check "Directorio protegido y servicios con recuperacion automatica" {
         return $false
     }
     $failure = (& sc.exe qfailure AdGuardHome 2>&1 | Out-String)
-    if ($failure -notmatch 'RESTART') {
+    if ($failure -notmatch 'RESTART|REINICIAR') {
         Write-Host " (AdGuardHome sin acciones de recuperacion -> protect-fortress.ps1) " -NoNewline -ForegroundColor Yellow
         return "WARN"
     }
@@ -375,12 +434,14 @@ Assert-Check "Integridad de scripts y puertos sensibles cerrados al exterior" {
         return "WARN"
     }
     $checker = Join-Path $fortressDir21 'integrity-check.ps1'
-    if (Test-Path $checker) {
-        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $checker -Verify -TargetDir $fortressDir21 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host " (hashes alterados -> integrity-check.ps1 -Restore) " -NoNewline -ForegroundColor Yellow
-            return $false
-        }
+    if (-not (Test-Path $checker)) {
+        Write-Host " (manifiesto presente pero falta integrity-check.ps1) " -NoNewline -ForegroundColor Yellow
+        return "WARN"
+    }
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $checker -Verify -TargetDir $fortressDir21 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host " (hashes alterados -> integrity-check.ps1 -Restore) " -NoNewline -ForegroundColor Yellow
+        return $false
     }
     $missing = @()
     foreach ($ruleName in @('AdGuard_Block_Inbound_Panel_3000', 'AdGuard_Block_Inbound_SOCKS_9050')) {
@@ -430,6 +491,38 @@ Assert-Check "LLMNR, NetBIOS, WPAD y SMBv1 desactivados (red local)" {
     return "WARN"
 }
 
+# 23. Puente DoH/Tor y ausencia de fugas directas de AdGuard
+Assert-Check "Puente DoH/Tor activo y AdGuard sin conexiones DNS directas" {
+    $bridge = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*doh-tor-bridge.js*' })
+    if ($bridge.Count -eq 0) {
+        Write-Host " (puente detenido -> inicia AdGuardHome_Fortress_DoHBridge) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    $tcp = Get-NetTCPConnection -LocalPort 5336 -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') }
+    $udp = Get-NetUDPEndpoint -LocalPort 5336 -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') }
+    if (-not $tcp -or -not $udp) {
+        Write-Host " (puente sin listener TCP/UDP en 5336) " -NoNewline -ForegroundColor Yellow
+        return $false
+    }
+    $agh = Get-Process -Name 'AdGuardHome' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($agh) {
+        $direct = @(Get-NetTCPConnection -OwningProcess $agh.Id -State Established -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.RemoteAddress -notin @('127.0.0.1', '::1') -and
+                ($_.RemotePort -in @(53, 443, 853))
+            })
+        if ($direct.Count -gt 0) {
+            Write-Host (" (AdGuard con {0} conexion(es) directas a {1}) " -f $direct.Count, $direct[0].RemoteAddress) -NoNewline -ForegroundColor Yellow
+            return $false
+        }
+    }
+    Write-Host ("(puente PID {0}) " -f $bridge[0].ProcessId) -NoNewline -ForegroundColor Gray
+    return $true
+}
+
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
 if ($passed -eq $total) {
@@ -440,3 +533,6 @@ if ($passed -eq $total) {
     Write-Host "   ⚠️ RESULTADO: $passed de $total pruebas superadas" -ForegroundColor Yellow
 }
 Write-Host "==========================================================" -ForegroundColor Cyan
+
+# El código de salida debe reflejar el resultado: los avisos tampoco son un OK.
+if ($passed -eq $total) { exit 0 } else { exit 1 }

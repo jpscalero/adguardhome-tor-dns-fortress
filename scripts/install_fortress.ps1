@@ -18,8 +18,8 @@ param(
     [ValidateSet('Auto', 'Home', 'Pro', 'Education', 'Enterprise')]
     [string]$EditionProfile = 'Auto',
     [switch]$SkipEditionHardening = $false,
-    [ValidateSet('privacy', 'speed', 'censorship')]
-    [string]$Profile = 'speed',
+    [ValidateSet('tor', 'speed', 'censorship', 'privacy')]
+    [string]$Profile = 'tor',
     [switch]$SkipUnbound = $false,
     [switch]$SkipProtection = $false,
     [switch]$SkipBrowserPrivacy = $false,
@@ -63,7 +63,7 @@ if ($DryRun) {
     Write-Host "  4. Copiar watchdog, failsafe, centinela, decoy, suite y lanzadores"
     Write-Host "  5. Apuntar los adaptadores activos a 127.0.0.1"
     Write-Host "  6. Crear reglas de firewall: 53/UDP, 53/TCP, 853/TCP, 5353/UDP"
-    Write-Host "  7. Registrar tareas: watchdog (boot) y failsafe (cada 2 min)"
+    Write-Host "  7. Registrar tareas: watchdog (boot), failsafe (cada 2 min) y puente DoH/Tor"
     Write-Host "  8. Restringir la ACL de config\.env"
     Write-Host "  9. Desactivar el DoH propio de Chrome/Edge/Firefox y uniformar el fingerprint"
     Write-Host " 10. Endurecer LLMNR, NetBIOS, WPAD y SMBv1 (red local)"
@@ -172,6 +172,12 @@ $scriptsToCopy = @(
     "apply-edition-hardening.ps1",
     "ai_dns_guard.js",
     "decoy_dns.js",
+    "doh-tor-bridge.js",
+    "dns-probe.js",
+    "fortress-health.ps1",
+    "fortress-doctor.ps1",
+    "repair-system.ps1",
+    "set-adguard-upstreams.js",
     "test_fortress.ps1"
 )
 foreach ($s in $scriptsToCopy) {
@@ -244,7 +250,8 @@ $triggers = @(
     (New-ScheduledTaskTrigger -AtStartup),
     (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650))
 )
-$principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$watchdogUser = "$env:USERDOMAIN\$env:USERNAME"
+$principal = New-ScheduledTaskPrincipal -UserId $watchdogUser -LogonType S4U -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650)
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Force | Out-Null
 Write-Host "  -> Tarea programada '$taskName' registrada y activa." -ForegroundColor Green
@@ -261,6 +268,48 @@ if (Test-Path $failsafeScript) {
     Write-Host "  -> Tarea programada '$failsafeTaskName' registrada (cada 2 min)." -ForegroundColor Green
 } else {
     Write-Host "  -> AVISO: no se encontro failsafe-dns.ps1; failsafe no registrado." -ForegroundColor Yellow
+}
+
+# 5.55. Registrar el puente DoH-over-Tor (AdGuard -> 5336 -> 9050)
+Write-Host "[5.55/6] Registrando puente DoH-over-Tor (127.0.0.1:5336 -> 9050)..." -ForegroundColor Yellow
+$bridgeScript = Join-Path $TargetDir "doh-tor-bridge.js"
+if (Test-Path $bridgeScript) {
+    $nodeExe = Join-Path $TargetDir "node\node.exe"
+    if (-not (Test-Path $nodeExe)) {
+        $nodeCmd = Get-Command node -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($nodeCmd) { $nodeExe = $nodeCmd.Source }
+    }
+    if ($nodeExe -and (Test-Path $nodeExe)) {
+        $bridgeTaskName = "AdGuardHome_Fortress_DoHBridge"
+        $bridgeLog = Join-Path $TargetDir "doh-bridge.log"
+        $bridgeAction = New-ScheduledTaskAction -Execute $nodeExe -Argument ('"{0}" --log-file "{1}"' -f $bridgeScript, $bridgeLog) -WorkingDirectory $TargetDir
+        $bridgeTriggers = @(
+            (New-ScheduledTaskTrigger -AtStartup),
+            (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650))
+        )
+        $bridgeSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650)
+        $bridgePrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $bridgeTaskName -Action $bridgeAction -Trigger $bridgeTriggers -Settings $bridgeSettings -Principal $bridgePrincipal -Force | Out-Null
+        Start-ScheduledTask -TaskName $bridgeTaskName
+        $bridgeReady = $false
+        for ($i = 0; $i -lt 20; $i++) {
+            $probe = New-Object System.Net.Sockets.TcpClient
+            try {
+                $async = $probe.BeginConnect("127.0.0.1", 5336, $null, $null)
+                if ($async.AsyncWaitHandle.WaitOne(500, $false) -and $probe.Connected) { $bridgeReady = $true; break }
+            } catch { } finally { $probe.Close() }
+            Start-Sleep -Milliseconds 300
+        }
+        if ($bridgeReady) {
+            Write-Host "  -> Puente DoH/Tor activo en 127.0.0.1:5336." -ForegroundColor Green
+        } else {
+            Write-Warning "  -> El puente no respondio en 5336; revisa la tarea $bridgeTaskName y doh-bridge.log."
+        }
+    } else {
+        Write-Warning "  -> No se encontro node.exe; el puente DoH/Tor no se registro."
+    }
+} else {
+    Write-Warning "  -> No se encontro doh-tor-bridge.js; el perfil tor no funcionara."
 }
 
 # 5.6. Hardening de secretos y DoH del navegador
@@ -319,28 +368,26 @@ if (-not $SkipEditionHardening) {
     }
 }
 
-# 5.8. Perfil DNS: speed (por defecto), privacy (Unbound recursivo) o censorship
-if (-not $SkipUnbound) {
-    if ($Profile -eq 'privacy') {
-        Write-Host "[5.8/6] Desplegando resolutor recursivo propio (Unbound)..." -ForegroundColor Yellow
-        $unboundScript = Join-Path $TargetDir "setup-unbound.ps1"
-        if (Test-Path $unboundScript) {
-            & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $unboundScript -TargetDir $TargetDir
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "  -> No se pudo instalar Unbound; se mantiene el perfil speed. Pasa -PackagePath al instalador o ejecuta scripts\setup-unbound.ps1."
-                $Profile = 'speed'
-            }
+# 5.8. Perfil DNS: tor (por defecto), speed, censorship o privacy
+if (($Profile -eq 'privacy') -and (-not $SkipUnbound)) {
+    Write-Host "[5.8/6] Desplegando resolutor recursivo propio (Unbound)..." -ForegroundColor Yellow
+    $unboundScript = Join-Path $TargetDir "setup-unbound.ps1"
+    if (Test-Path $unboundScript) {
+        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $unboundScript -TargetDir $TargetDir
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "  -> No se pudo instalar Unbound; se usara el perfil tor. Ejecuta scripts\setup-unbound.ps1 y vuelve a aplicar privacy."
+            $Profile = 'tor'
         }
     }
-    $profileScript = Join-Path $TargetDir "apply-dns-profile.ps1"
-    $configFile = Join-Path $TargetDir "AdGuardHome.yaml"
-    if ((Test-Path $profileScript) -and (Test-Path $configFile)) {
-        & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $profileScript -Profile $Profile -TargetDir $TargetDir
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "  -> El perfil $Profile no se pudo aplicar; revisa AdGuardHome.yaml."
-        } else {
-            Write-Host "  -> Perfil DNS activo: $Profile." -ForegroundColor Green
-        }
+}
+$profileScript = Join-Path $TargetDir "apply-dns-profile.ps1"
+$configFile = Join-Path $TargetDir "AdGuardHome.yaml"
+if ((Test-Path $profileScript) -and (Test-Path $configFile)) {
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $profileScript -Profile $Profile -TargetDir $TargetDir -Restart
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "  -> El perfil $Profile no se pudo aplicar; revisa AdGuardHome.yaml."
+    } else {
+        Write-Host "  -> Perfil DNS activo: $Profile." -ForegroundColor Green
     }
 }
 

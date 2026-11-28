@@ -1,0 +1,34 @@
+==========================================================
+   ??? FORTRESS HEALTH & SECURITY DIAGNOSTIC SUITE
+==========================================================
+
+   Windows: Windows 11 Pro 26H2 (build 26300.9974) | Professional | Tier 2 - Avanzado
+   Hardening de edicion: 7 modulo(s), 0 aviso(s)
+
+[1] Puerto 53 UDP vinculado exclusivamente a AdGuard Home... OK
+[2] T£nel Tor SOCKS5 en escucha y salida an¢nima (127.0.0.1:9050)... (Exit IP confirmada) OK
+[3] Puerto DNS nativo de Tor en escucha (UDP 127.0.0.1:5350)... OK
+[4] Resoluci¢n DNS local en 127.0.0.1:53 (github.com)... (46ms) OK
+[5] Resoluci¢n nativa de dominios Tor .onion (Virtual IP 10.x.x.x)... OK
+[6] Bloqueo activo de telemetr¡a y dominios de riesgo (NXDOMAIN)... OK
+[7] Servicio GoodbyeDPI (Anti-DPI / WinDivert)... OK
+[8] Centinela AI de detecci¢n DGA/C2 (ai_dns_guard.js)... OK
+[9] Generador de tr fico se¤uelo anti-fingerprinting (decoy_dns.js)... OK
+[10] Neutralizaci¢n de secuestro de puerto 53 (SharedAccess/ICS)... OK
+[11] Permisos de config\.env restringidos (sin Usuarios/AppContainer)... OK
+[12] Reglas anti-fuga DoT 853 y mDNS 5353 activas... OK
+[13] Heartbeat del watchdog reciente (< 120 s)... (17s) OK
+[14] Tarea programada del failsafe activa... (activa: AdGuardHome_DNS_Failsafe) OK
+[15] DoH del navegador desactivado por politica (Chrome/Edge)... OK
+[16] Integridad del binario de AdGuardHome (hash registrado)... OK
+[17] DNS real de Windows apunta a la fortaleza (127.0.0.1)... (Ethernet) OK
+[18] Perfil DNS activo (puente DoH/Tor o Unbound)... (puente DoH/Tor 127.0.0.1:5336) OK
+[19] Watchdog con repeticion y guardian anti-manipulacion registrados... OK
+[20] Directorio protegido y servicios con recuperacion automatica... OK
+[21] Integridad de scripts y puertos sensibles cerrados al exterior... OK
+[22] LLMNR, NetBIOS, WPAD y SMBv1 desactivados (red local)... OK
+[23] Puente DoH/Tor activo y AdGuard sin conexiones DNS directas... (puente PID 15556) OK
+
+==========================================================
+   ? TODAS LAS PRUEBAS SUPERADAS (23/23): FORTALEZA 100% ACTIVA
+==========================================================

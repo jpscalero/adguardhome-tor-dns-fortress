@@ -10,7 +10,7 @@ impacto real y con su motivo.
 - [x] **Perfil recursivo con `unbound`**: resolver desde la raíz sin delegar en
       Quad9/Cloudflare. Implementado en `config/unbound.conf.template` y
       `scripts/setup-unbound.ps1` (loopback, DNSSEC, sin log de consultas).
-- [x] **Selector de perfil** (`privacy` / `speed` / `censorship`):
+- [x] **Selector de perfil** (`tor` / `privacy` / `speed` / `censorship`):
       `scripts/apply-dns-profile.ps1` reescribe el bloque de upstreams con
       respaldo, validación y rollback.
 - [ ] **Rotación programada de upstreams** con verificación de que el nuevo

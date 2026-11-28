@@ -43,7 +43,8 @@ users:
 auth_attempts: 3
 block_auth_min: 30
 
-# HTTP Proxy: Routes AdGuard Home management traffic (filter list downloads, version checks) through Tor:
+# HTTP Proxy: rutas de gestion (listas, actualizaciones) por Tor. NO cubre DNS:
+# dnsproxy no soporta SOCKS5 en upstreams; para eso esta el puente local 5336.
 http_proxy: socks5://127.0.0.1:9050
 language: es
 theme: dark
@@ -68,60 +69,34 @@ dns:
     # - __YOUR_LOCAL_IP__
   refuse_any: true
 
-  # Resolutores DoH por IP fija, en paralelo.
+  # AdGuard Home no puede enviar DNS por SOCKS5: dnsproxy no acepta
+  # socks5:// en un upstream y http_proxy solo cubre su cliente HTTP.
+  # La cadena es: AdGuard -> 127.0.0.1:5336 (puente DoH/Tor) ->
+  # 127.0.0.1:9050 (SOCKS5) -> Quad9 DoH (9.9.9.9 / 149.112.112.112).
   #
-  # Por que por IP y no por nombre:
-  #   - Con proxy, AdGuard Home resuelve el hostname del upstream con
-  #     bootstrap_dns, que es DNS en claro: una fuga pequena pero real.
-  #   - Con la IP en la URL no hay resolucion previa (los certificados de
-  #     Quad9, Cloudflare y AdGuard DNS incluyen la IP como SAN).
+  # El puente valida el certificado TLS, reenvia el bit DO y no resuelve
+  # nombres fuera de Tor. Quad9 valida DNSSEC; .onion se queda en el
+  # DNSPort de Tor (127.0.0.1:5350). Si el puente cae, el DNS falla
+  # cerrado: no hay fallback directo.
   #
-  # Por que el tunel va en http_proxy y no en el upstream:
-  #   AdGuard Home NO admite la sintaxis "[https://host] socks5://..."; los
-  #   corchetes son solo para upstreams por dominio ("[/ejemplo.local/]ipo").
-  #   El trafico HTTP del cliente DoH si respeta http_proxy, y eso es lo que
-  #   hace que el resolutor vea una salida de Tor y no tu IP real.
-  #
-  # Verificado en produccion con: --check-config, DNSSEC y salida Tor.
+  # Perfil por defecto: tor. Cambia con scripts/apply-dns-profile.ps1.
   # >>> FORTRESS-UPSTREAM >>>
-  # Perfil por defecto: speed (DoH en paralelo por IP fija a traves de Tor).
-  # Cambia de perfil con scripts/apply-dns-profile.ps1 sin editar a mano.
   upstream_dns:
-    # Quad9 (Suiza, filtrado de malware, valida DNSSEC)
-    - https://9.9.9.9/dns-query
-    - https://149.112.112.112/dns-query
-    # Cloudflare (sin filtrado)
-    - https://1.1.1.1/dns-query
-    - https://1.0.0.1/dns-query
-    # AdGuard DNS (filtrado)
-    - https://94.140.14.14/dns-query
+    - 127.0.0.1:5336
     # Resolutor nativo de Tor para .onion (IP virtual, no sale de Tor)
     - '[/onion/]127.0.0.1:5350'
-    #
-    # Alternativas (conviertelas a su IP si las usas, por el motivo de arriba):
-    # - https://dns.digitale-gesellschaft.ch/dns-query   # Suiza
-    # - https://doh.applied-privacy.net/query            # Austria, GDPR
-    # - https://base.dns.mullvad.net/dns-query           # Mullvad
-    # - https://doh.dns.sb/dns-query                     # DNS.SB
-    # - https://security.cloudflare-dns.com/dns-query    # 1.1.1.2
-
   upstream_dns_file: ""
 
-  # Bootstrap DNS: Literal IPs only (prevents circular dependency resolving bootstrap hostnames over SOCKS5):
+  # Bootstrap: el upstream es loopback; no hay resolucion previa.
   bootstrap_dns:
-    - 9.9.9.9
-    - 1.1.1.2
-    - 149.112.112.112
-    - 1.0.0.1
+    - 127.0.0.1:5336
 
-  fallback_dns:
-    - 9.9.9.9
-    - 1.1.1.2
-    - 149.112.112.112
+  # Sin resolutores de respaldo directos (fail-closed).
+  fallback_dns: []
 
-  # Parallel Race Mode: queries all neutral resolvers concurrently, accepts fastest answer
+  # Una sola ruta; se conserva parallel por compatibilidad.
   upstream_mode: parallel
-  fastest_timeout: 1s
+  fastest_timeout: 2s
 
   # <<< FORTRESS-UPSTREAM <<<
   allowed_clients: []

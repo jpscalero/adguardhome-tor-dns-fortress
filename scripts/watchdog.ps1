@@ -21,6 +21,9 @@ param(
 $consoleHelper = Join-Path $PSScriptRoot 'console-utf8.ps1'
 if (Test-Path $consoleHelper) { . $consoleHelper }
 
+$healthHelper = Join-Path $PSScriptRoot 'fortress-health.ps1'
+if (Test-Path $healthHelper) { . $healthHelper }
+
 $logFile = Join-Path $AdGuardDir "watchdog.log"
 $heartbeatFile = Join-Path $AdGuardDir "watchdog.heartbeat"
 $maxLogBytes = 2 * 1024 * 1024 # 2MB
@@ -101,7 +104,18 @@ function Invoke-TorNewNym {
     }
 }
 
-Write-WatchdogLog "INFO" "Watchdog de Autorreparacion v2.2 iniciado. Monitoreando Tor, AdGuard Home, GoodbyeDPI, Centinela AI y Decoy DNS..."
+function Test-TorExit {
+    param([int]$TimeoutMs = 15000)
+    return Test-FortressTorExit -TimeoutMs $TimeoutMs
+}
+
+function Test-RepairCooldown {
+    param($Last, [int]$Seconds = 300)
+    if (-not $Last) { return $true }
+    return (((Get-Date) - $Last).TotalSeconds -ge $Seconds)
+}
+
+Write-WatchdogLog "INFO" "Watchdog de Autorreparacion v3.0 iniciado. Monitoreando Tor, AdGuard Home, puente DoH, GoodbyeDPI, Centinela AI y Decoy DNS..."
 
 # Check prior heartbeat on startup
 try {
@@ -120,6 +134,14 @@ try {
 $torFailCount = 0
 $aghFailCount = 0
 $cycle = 0
+$bridgeHealthy = $false
+$aghDnsHealthy = $false
+$pipelineHealthy = $false
+$torPortOpen = $false
+$lastTorRestart = $null
+$lastAghRestart = $null
+$lastBridgeRestart = $null
+$lastDecoyStart = $null
 
 while ($true) {
     try {
@@ -146,10 +168,20 @@ while ($true) {
                 $torFailCount++
                 Write-WatchdogLog "WARN" "Tor puerto SOCKS5 9050 no responde (Fallo $torFailCount de 2)."
                 if ($torFailCount -ge 2) {
-                    Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando Tor Service por falta de respuesta en puerto 9050..."
-                    Restart-Service -Name "tor" -Force -ErrorAction SilentlyContinue
-                    Start-Sleep -Seconds 5
-                    $torFailCount = 0
+                    if (Test-RepairCooldown -Last $lastTorRestart -Seconds 300) {
+                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando Tor Service por falta de respuesta en puerto 9050..."
+                        Add-FortressEvent -Code 'TOR_RESTART' -Level 'WARN' -Message 'Puerto 9050 sin respuesta; reinicio de Tor.' -AdGuardDir $AdGuardDir
+                        $lastTorRestart = Get-Date
+                        if ($torSvc -and $torSvc.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+                            Start-Service -Name "tor" -ErrorAction SilentlyContinue
+                            Start-Sleep -Seconds 5
+                        } else {
+                            Write-WatchdogLog "WARN" "Tor sigue ejecutandose pero 9050 no responde; no se reinicia automaticamente para evitar bloqueos. Revisa Tor manualmente."
+                        }
+                        $torFailCount = 0
+                    } elseif ($cycle % 10 -eq 0) {
+                        Write-WatchdogLog "WARN" "Tor sigue sin responder; reinicio en espera por cooldown de 5 minutos."
+                    }
                 }
             } else {
                 if ($torFailCount -gt 0) {
@@ -159,6 +191,49 @@ while ($true) {
             }
         } catch {
             Write-WatchdogLog "ERROR" "Error comprobando estado de Tor: $($_.Exception.Message)"
+        }
+
+        # --------------------------------------------------------------------------
+        # 1.4. DOH-OVER-TOR BRIDGE HEALTH CHECK
+        # --------------------------------------------------------------------------
+        $bridgeHealthy = $false
+        try {
+            $bridgePortOpen = Test-PortOpen -IP "127.0.0.1" -Port 5336 -TimeoutMs 1500
+            if ($bridgePortOpen) {
+                $bridgeProbe = Test-FortressDnsQuery -Name 'example.com' -Port 5336 -TimeoutMs 8000
+                if ($bridgeProbe.Success) {
+                    $bridgeHealthy = $true
+                } else {
+                    Write-WatchdogLog "WARN" "Puente DoH/Tor 5336 no resuelve: $($bridgeProbe.Error)."
+                }
+            } else {
+                Write-WatchdogLog "WARN" "Puente DoH/Tor 5336 no escucha."
+            }
+
+            if (-not $bridgeHealthy -and (Test-RepairCooldown -Last $lastBridgeRestart -Seconds 180)) {
+                Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando puente DoH/Tor (tarea AdGuardHome_Fortress_DoHBridge)..."
+                Add-FortressEvent -Code 'BRIDGE_RESTART' -Level 'WARN' -Message 'Puente 5336 no sano; reinicio controlado.' -AdGuardDir $AdGuardDir
+                $lastBridgeRestart = Get-Date
+                $bridgeProcs = Get-FortressProcessList -Pattern '*doh-tor-bridge.js*'
+                foreach ($bp in $bridgeProcs) {
+                    try { Stop-Process -Id $bp.ProcessId -Force -ErrorAction SilentlyContinue } catch { }
+                }
+                Stop-ScheduledTask -TaskName "AdGuardHome_Fortress_DoHBridge" -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 1
+                Start-ScheduledTask -TaskName "AdGuardHome_Fortress_DoHBridge" -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 4
+                if (Test-PortOpen -IP "127.0.0.1" -Port 5336 -TimeoutMs 2000) {
+                    $bridgeProbe = Test-FortressDnsQuery -Name 'example.com' -Port 5336 -TimeoutMs 8000
+                    $bridgeHealthy = [bool]$bridgeProbe.Success
+                }
+                if ($bridgeHealthy) {
+                    Write-WatchdogLog "INFO" "Puente DoH/Tor recuperado y resolviendo por HTTP/2."
+                } else {
+                    Write-WatchdogLog "ERROR" "El puente sigue sin resolver tras el reinicio; revisa doh-bridge.log."
+                }
+            }
+        } catch {
+            Write-WatchdogLog "ERROR" "Error comprobando el puente DoH/Tor: $($_.Exception.Message)"
         }
 
         # --------------------------------------------------------------------------
@@ -185,25 +260,33 @@ while ($true) {
                 Start-Sleep -Seconds 3
             }
 
-            $dnsRes = Resolve-DnsName -Name "localhost" -Server "127.0.0.1" -QuickTimeout -ErrorAction SilentlyContinue
-            if (-not $dnsRes) {
-                $dnsRes = Resolve-DnsName -Name "wikipedia.org" -Server "127.0.0.1" -QuickTimeout -ErrorAction SilentlyContinue
-            }
-
-            if (-not $dnsRes) {
-                $aghFailCount++
-                Write-WatchdogLog "WARN" "AdGuard Home no respondio consulta DNS local (Fallo $aghFailCount de 2)."
-                if ($aghFailCount -ge 2) {
-                    Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando AdGuard Home por falta de respuesta DNS..."
-                    Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
-                    Start-Sleep -Seconds 4
+            $aghDnsHealthy = $false
+            if ($bridgeHealthy) {
+                $dnsProbe = Test-FortressDnsQuery -Name 'example.com' -Port 53 -TimeoutMs 12000
+                $aghDnsHealthy = [bool]$dnsProbe.Success
+                if (-not $aghDnsHealthy) {
+                    $aghFailCount++
+                    Write-WatchdogLog "WARN" "AdGuard Home no respondio consulta DNS real (Fallo $aghFailCount de 2): $($dnsProbe.Error)."
+                    if ($aghFailCount -ge 2 -and (Test-RepairCooldown -Last $lastAghRestart -Seconds 300)) {
+                        Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando AdGuard Home por falta de respuesta DNS..."
+                        Add-FortressEvent -Code 'ADGUARD_RESTART' -Level 'WARN' -Message 'AdGuard no resuelve con el puente sano; reinicio controlado.' -AdGuardDir $AdGuardDir
+                        $lastAghRestart = Get-Date
+                        Restart-Service -Name "AdGuardHome" -Force -ErrorAction SilentlyContinue
+                        Start-Sleep -Seconds 4
+                        $aghFailCount = 0
+                    } elseif ($aghFailCount -ge 2) {
+                        Write-WatchdogLog "WARN" "AdGuard sigue sin resolver; reinicio en espera por cooldown de 5 minutos."
+                    }
+                } else {
+                    if ($aghFailCount -gt 0) {
+                        Write-WatchdogLog "INFO" "AdGuard Home ha recuperado la resolucion DNS real."
+                    }
                     $aghFailCount = 0
                 }
             } else {
-                if ($aghFailCount -gt 0) {
-                    Write-WatchdogLog "INFO" "AdGuard Home ha recuperado la resolucion DNS local."
+                if ($cycle % 10 -eq 0) {
+                    Write-WatchdogLog "INFO" "AdGuard no se valida todavia: el puente 5336 no esta sano."
                 }
-                $aghFailCount = 0
             }
         } catch {
             Write-WatchdogLog "ERROR" "Error comprobando AdGuard Home: $($_.Exception.Message)"
@@ -296,7 +379,11 @@ while ($true) {
             $aiProc = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*ai_dns_guard.js*" }
 
-            if (-not $aiProc) {
+            if (-not $aiProc -and -not $aghDnsHealthy) {
+                if ($cycle % 10 -eq 0) {
+                    Write-WatchdogLog "INFO" "Centinela AI no se relanza: AdGuard DNS no esta sano."
+                }
+            } elseif (-not $aiProc) {
                 # ------------------------------------------------------------------
                 # Guardas anti-bucle (Fase 2):
                 #  - sin credenciales validas el centinela sale con codigo 1 y el
@@ -396,7 +483,11 @@ while ($true) {
             $decoyProc = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*decoy_dns.js*" }
 
-            if (-not $decoyProc) {
+            if (-not $decoyProc -and -not ($bridgeHealthy -and $aghDnsHealthy)) {
+                if ($cycle % 10 -eq 0) {
+                    Write-WatchdogLog "INFO" "Decoy no se relanza: pipeline no sano (bridge=$bridgeHealthy dns=$aghDnsHealthy)."
+                }
+            } elseif (-not $decoyProc) {
                 if ($null -eq $script:launchBackoff) { $script:launchBackoff = @{} }
 
                 $decoyLauncher = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -474,7 +565,11 @@ while ($true) {
                             (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650))
                         )
                         $guardSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650)
-                        $guardPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+                        if ($env:USERNAME -eq 'SYSTEM') {
+                            $guardPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+                        } else {
+                            $guardPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
+                        }
                         Register-ScheduledTask -TaskName "AdGuardHome_Fortress_Guard" -Action $guardAction -Trigger $guardTriggers -Settings $guardSettings -Principal $guardPrincipal -Force | Out-Null
                         Write-WatchdogLog "HEAL" "[ANTI-TAMPER] Guardian eliminado; tarea recreada."
                     }
@@ -489,17 +584,54 @@ while ($true) {
         # --------------------------------------------------------------------------
         if ($cycle % 10 -eq 0) {
             try {
-                $e2eSw = [System.Diagnostics.Stopwatch]::StartNew()
-                $e2eDns = Resolve-DnsName -Name "duckduckgo.com" -Server "127.0.0.1" -QuickTimeout -ErrorAction SilentlyContinue
-                $e2eSw.Stop()
-                if ($e2eDns) {
-                    Write-WatchdogLog "INFO" "[PIPELINE HEALTHY] End-to-end DNS -> SOCKS5(Tor) -> Resolver verificado en $($e2eSw.ElapsedMilliseconds)ms."
+                $pipeSw = [System.Diagnostics.Stopwatch]::StartNew()
+                $pipe = Get-FortressPipeline -AdGuardDir $AdGuardDir
+                $pipeSw.Stop()
+                $pipelineHealthy = [bool]$pipe.Healthy
+
+                if ($pipelineHealthy) {
+                    Write-WatchdogLog "INFO" "[PIPELINE HEALTHY] Tor exit + puente + AdGuard + DNS OK en $($pipeSw.ElapsedMilliseconds)ms."
                 } else {
-                    Write-WatchdogLog "WARN" "[PIPELINE SLOW/FAIL] Consulta end-to-end fallo o demoro demasiado."
+                    $torDetail = if ($pipe.TorExit) { if ($pipe.TorExit.Success) { 'ok' } else { $pipe.TorExit.Error } } else { 'sin-prueba' }
+                    $bridgeDetail = if ($pipe.BridgeDns) { if ($pipe.BridgeDns.Success) { 'ok' } else { $pipe.BridgeDns.Error } } else { 'sin-prueba' }
+                    $aghDetail = if ($pipe.AdGuardDns) { if ($pipe.AdGuardDns.Success) { 'ok' } else { $pipe.AdGuardDns.Error } } else { 'sin-prueba' }
+                    Write-WatchdogLog "WARN" "[PIPELINE FAIL] torPort=$($pipe.TorPort) torExit=$torDetail bridgePort=$($pipe.BridgePort) bridgeDns=$bridgeDetail agh=$($pipe.AdGuardService) aghDns=$aghDetail"
+
+                    if (-not $pipe.TorPort -or ($pipe.TorExit -and -not $pipe.TorExit.Success)) {
+                        Write-WatchdogLog "WARN" "Salida Tor no sana; no se reinicia automaticamente en la auditoria (evita bloqueos del watchdog)."
+                        Add-FortressEvent -Code 'TOR_EXIT_FAIL' -Level 'WARN' -Message "Salida Tor fallida: $torDetail" -AdGuardDir $AdGuardDir
+                    }
+
+                    if (-not $pipe.BridgePort -or ($pipe.BridgeDns -and -not $pipe.BridgeDns.Success)) {
+                        if (Test-RepairCooldown -Last $lastBridgeRestart -Seconds 180) {
+                            Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando puente DoH/Tor tras auditoria fallida..."
+                            Add-FortressEvent -Code 'BRIDGE_FAIL' -Level 'WARN' -Message "Puente fallido: $bridgeDetail" -AdGuardDir $AdGuardDir
+                            $lastBridgeRestart = Get-Date
+                            $bridgeProcs = Get-FortressProcessList -Pattern '*doh-tor-bridge.js*'
+                            foreach ($bp in $bridgeProcs) {
+                                try { Stop-Process -Id $bp.ProcessId -Force -ErrorAction SilentlyContinue } catch { }
+                            }
+                            Stop-ScheduledTask -TaskName 'AdGuardHome_Fortress_DoHBridge' -ErrorAction SilentlyContinue
+                            Start-Sleep -Seconds 1
+                            Start-ScheduledTask -TaskName 'AdGuardHome_Fortress_DoHBridge' -ErrorAction SilentlyContinue
+                            Start-Sleep -Seconds 4
+                        }
+                    }
+
+                    if ($pipe.AdGuardService -eq 'Running' -and $pipe.BridgeDns -and $pipe.BridgeDns.Success -and $pipe.AdGuardDns -and -not $pipe.AdGuardDns.Success) {
+                        if (Test-RepairCooldown -Last $lastAghRestart -Seconds 300) {
+                            Write-WatchdogLog "HEAL" "[AUTO-REPAIR] Reiniciando AdGuard tras auditoria DNS fallida..."
+                            Add-FortressEvent -Code 'ADGUARD_DNS_FAIL' -Level 'WARN' -Message "AdGuard DNS fallido: $aghDetail" -AdGuardDir $AdGuardDir
+                            $lastAghRestart = Get-Date
+                            Restart-Service -Name 'AdGuardHome' -Force -ErrorAction SilentlyContinue
+                            Start-Sleep -Seconds 4
+                        }
+                    }
                 }
 
-                # Rotate Tor circuits if control password is configured
-                Invoke-TorNewNym
+                # La rotacion de circuito ya no se hace cada 5 minutos: eso
+                # provocaba cortes durante la construccion del circuito.
+                if ($cycle % 60 -eq 0) { Invoke-TorNewNym }
             } catch {
                 Write-WatchdogLog "WARN" "Auditoria end-to-end fallo con excepcion: $($_.Exception.Message)"
             }
@@ -508,6 +640,23 @@ while ($true) {
     } catch {
         Write-WatchdogLog "ERROR" "Excepcion no controlada en ciclo del watchdog: $($_.Exception.Message)"
     }
+
+    try {
+        $decoyStatus = Get-FortressDecoyStatus -AdGuardDir $AdGuardDir
+        $bridgeStatus = Get-FortressBridgeStatus -AdGuardDir $AdGuardDir
+        $aiNow = @(Get-FortressProcessList -Pattern '*ai_dns_guard.js*')
+        $decoyNow = @(Get-FortressProcessList -Pattern '*decoy_dns.js*')
+        $state = @{
+            cycle = $cycle
+            tor = @{ port = $torPortOpen; service = (Get-FortressServiceStatus -Name 'tor'); failCount = $torFailCount }
+            bridge = @{ healthy = $bridgeHealthy; status = $bridgeStatus }
+            adguard = @{ service = (Get-FortressServiceStatus -Name 'AdGuardHome'); dnsHealthy = $aghDnsHealthy; failCount = $aghFailCount }
+            pipeline = @{ healthy = $pipelineHealthy }
+            decoy = @{ running = ($decoyNow.Count -gt 0); status = $decoyStatus }
+            ai = @{ running = ($aiNow.Count -gt 0) }
+        }
+        Write-FortressState -State $state -AdGuardDir $AdGuardDir
+    } catch { }
 
     Start-Sleep -Seconds $CheckIntervalSeconds
 }

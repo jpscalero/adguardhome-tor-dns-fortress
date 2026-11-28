@@ -95,3 +95,78 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall_fortress.ps1
 ```
 
 Conserva configuración, logs y respaldos salvo que añadas `-RemoveData`.
+
+## El watchdog no actualiza el heartbeat (test 13)
+
+Si `watchdog.heartbeat` tiene horas o días, comprueba la tarea y su identidad:
+
+```powershell
+Get-ScheduledTask -TaskName AdGuardHome_Fortress_Watchdog | Format-List State
+(Get-ScheduledTask -TaskName AdGuardHome_Fortress_Watchdog).Principal | Format-List UserId,LogonType,RunLevel
+Get-Item C:\AdGuardHome\watchdog.heartbeat | Select-Object LastWriteTime
+```
+
+AdGuard ejecuta un `permcheck` que puede quitar SYSTEM del ACL del directorio.
+Por eso el watchdog debe correr con la cuenta de usuario administrador en S4U:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\AdGuardHome\repair-system.ps1
+```
+
+Si el archivo no se puede leer/escribir, repara su ACL con una consola elevada:
+
+```powershell
+takeown /F C:\AdGuardHome\watchdog.heartbeat /A
+icacls C:\AdGuardHome\watchdog.heartbeat /grant *S-1-5-32-544:F *S-1-5-32-545:R *S-1-5-18:F
+```
+
+No vuelvas a registrar el watchdog como SYSTEM: el ACL puede eliminarlo en el
+siguiente arranque de AdGuard.
+
+## El DNS vuelve solo a 127.0.0.1
+
+Es el comportamiento esperado del failsafe `AdGuardHome_DNS_Failsafe`: si
+AdGuard responde, adopta `127.0.0.1` para que el sistema no quede sin DNS. No es
+una fuga ni un fallo del test 17.
+
+Las reglas `AdGuard_Block_Outbound_DNS_UDP` y
+`AdGuard_Block_Outbound_DNS_TCP` bloquean el puerto 53 para **cualquier**
+programa (`Program=Any`), incluido el router. Por eso DHCP (`192.168.0.1`) no
+resuelve; el único estado funcional es `127.0.0.1`. Comprueba con:
+
+```powershell
+Get-DnsClientServerAddress -InterfaceIndex 14 -AddressFamily IPv4
+Get-Content C:\AdGuardHome\failsafe.log -Tail 10
+```
+
+El script `test-dhcp-mode.ps1` es un diagnóstico: desactiva temporalmente las
+reglas DNS 53, mide DHCP y **restaura solo** `127.0.0.1`, las reglas y las
+tareas. No lo uses como configuración permanente. Para fijar el DNS de forma
+deliberada usa:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\AdGuardHome\repair-system.ps1 -SetSystemDns
+```
+
+En esta red el router rechaza DNS incluso con las reglas desactivadas, así que
+DHCP no resuelve. No abras el puerto 53 esperando arreglarlo.
+
+## NetBIOS sigue en 1/2 después del hardening
+
+El registro ya está en `NetbiosOptions=2`, pero el adaptador puede conservar el
+estado anterior hasta reiniciar. Ejecuta `harden-network-protocols.ps1` y
+reinicia Windows; no hace falta volver a ejecutar el hardening.
+
+## Acceso denegado a fortress.manifest.json (test 21)
+
+El manifiesto no contiene secretos y debe poder leerse sin elevación. En una
+consola elevada:
+
+```powershell
+takeown /F C:\AdGuardHome\fortress.manifest.json /A
+icacls C:\AdGuardHome\fortress.manifest.json /grant *S-1-5-32-544:F *S-1-5-32-545:R *S-1-5-18:F
+powershell -ExecutionPolicy Bypass -File C:\AdGuardHome\integrity-check.ps1 -Create -TargetDir C:\AdGuardHome
+```
+
+Regenera el manifiesto después de cambiar scripts; si no, el test 21 también
+fallará por hash desactualizado.
